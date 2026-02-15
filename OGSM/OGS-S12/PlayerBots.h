@@ -48,6 +48,14 @@ enum class ELootableType {
     Pickup = 1
 };
 
+enum class ELobbyBotState {
+    Idle,
+    Moving,
+    Emoting,
+    PickingUpWeapon,
+    Shooting
+};
+
 std::vector<class PlayerBot*> PlayerBotArray{};
 struct PlayerBot
 {
@@ -145,6 +153,353 @@ public:
     // Strategic dropping
     bool bTargetingRoofChest = false;
     FVector RoofChestLocation = FVector();
+    FBossPOI* TargetBossPOI = nullptr;
+
+    // Lobby bot behavior
+    ELobbyBotState LobbyState = ELobbyBotState::Idle;
+    float LobbyActionTimer = 0.f;
+    AFortPickup* TargetWeaponPickup = nullptr;
+
+    // Reactive defense
+    float LastDamageTime = 0.f;
+    FVector LastDamageDirection;
+    bool bIsUnderFire = false;
+    int32 ConsecutiveShotsTaken = 0;
+
+    // Farming
+    bool bNeedsFarming = false;
+    float FarmingTargetAmount = 500.f;
+    AActor* FarmingTarget = nullptr;
+    float LastFarmTime = 0.f;
+    int32 WoodCount = 0;
+    int32 StoneCount = 0;
+    int32 MetalCount = 0;
+
+    // Human-like behavior
+    float ReactionTime = 0.2f;
+    float AimAccuracy = 0.8f;
+    bool bMakesMistakes = true;
+    float MistakeChance = 0.1f;
+    float AggressionLevel = 0.5f;
+    float LastAimTime = 0.f;
+
+
+    // OGSM - Initialize bot personality with variations
+    inline void InitializeBotPersonality() {
+        ReactionTime = 0.15f + (rand() % 20) / 100.f;
+        AimAccuracy = 0.6f + (rand() % 40) / 100.f;
+        AggressionLevel = 0.3f + (rand() % 50) / 100.f;
+        MistakeChance = 0.05f + (rand() % 15) / 100.f;
+    }
+
+    // OGSM - On take damage for reactive defense
+    inline void OnTakeDamage(float Damage, AActor* DamageCauser, FVector HitDirection) {
+        LastDamageTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+        LastDamageDirection = HitDirection;
+        bIsUnderFire = true;
+        ConsecutiveShotsTaken++;
+
+        if (HasEnoughResources(10) && Pawn) {
+            BuildDefensiveWall(HitDirection);
+        }
+
+        if (ConsecutiveShotsTaken >= 3 && HasEnoughResources(50)) {
+            BuildBox();
+        }
+
+        if (BotState == EBotState::LookingForPlayers) {
+            CachedBotState = BotState;
+            BotState = EBotState::Stuck;
+        }
+    }
+
+    // OGSM - Build defensive wall against threat
+    inline void BuildDefensiveWall(FVector ThreatDirection) {
+        if (!Pawn || !HasEnoughResources(10)) return;
+
+        FVector BotLoc = Pawn->K2_GetActorLocation();
+        ThreatDirection.Z = 0;
+        ThreatDirection.Normalize();
+
+        FRotator WallRot = ThreatDirection.Rotation();
+        WallRot.Yaw += 90.f;
+
+        FVector WallLoc = BotLoc + ThreatDirection * 100.f;
+        WallLoc.Z = BotLoc.Z;
+
+        if (Globals::bBotBuildingEnabled) {
+            BotBuilding::BuildWallAt(this, WallLoc, WallRot);
+        }
+    }
+
+    // OGSM - Check if has enough materials
+    inline bool HasEnoughResources(int32 Amount) {
+        int32 Total = WoodCount + StoneCount + MetalCount;
+        return Total >= Amount;
+    }
+
+    // OGSM - Update material counts from inventory
+    inline void UpdateMaterialCounts() {
+        if (!PC || !PC->Inventory) return;
+
+        WoodCount = 0;
+        StoneCount = 0;
+        MetalCount = 0;
+
+        for (int32 i = 0; i < PC->Inventory->Inventory.ReplicatedEntries.Num(); i++) {
+            auto& Entry = PC->Inventory->Inventory.ReplicatedEntries[i];
+            if (!Entry.ItemDefinition) continue;
+
+            std::string Name = Entry.ItemDefinition->Name.ToString();
+            if (Name.contains("Wood")) WoodCount = Entry.Count;
+            else if (Name.contains("Stone")) StoneCount = Entry.Count;
+            else if (Name.contains("Metal")) MetalCount = Entry.Count;
+        }
+
+        bNeedsFarming = NeedsFarming();
+    }
+
+    // OGSM - Check if bot needs farming
+    inline bool NeedsFarming() {
+        int32 Total = WoodCount + StoneCount + MetalCount;
+        return Total < 200;
+    }
+
+    // OGSM - Find nearest farmable object
+    inline AActor* FindFarmableObject() {
+        if (!Pawn) return nullptr;
+
+        static auto BuildingClass = ABuildingSMActor::StaticClass();
+        TArray<AActor*> Array;
+        UGameplayStatics::GetDefaultObj()->GetAllActorsOfClass(UWorld::GetWorld(), BuildingClass, &Array);
+
+        AActor* BestTarget = nullptr;
+        float MinDist = FLT_MAX;
+
+        for (size_t i = 0; i < Array.Num(); i++) {
+            ABuildingSMActor* Building = (ABuildingSMActor*)Array[i];
+            if (!Building || Building->bDestroyed) continue;
+
+            float Health = Building->GetHealth();
+            if (Health > 0 && Health < 2000) {
+                float Dist = Pawn->GetDistanceTo(Building);
+                if (Dist < MinDist && Dist < 1000.f) {
+                    MinDist = Dist;
+                    BestTarget = Building;
+                }
+            }
+        }
+
+        Array.Free();
+        return BestTarget;
+    }
+
+    // OGSM - Farm tick
+    inline void FarmTick() {
+        if (!bNeedsFarming || !Pawn) return;
+
+        float CurrentTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+        if (CurrentTime - LastFarmTime < 1.f) return;
+
+        if (!FarmingTarget || (FarmingTarget->IsA(ABuildingSMActor::StaticClass()) && ((ABuildingSMActor*)FarmingTarget)->bDestroyed)) {
+            FarmingTarget = FindFarmableObject();
+        }
+
+        if (FarmingTarget) {
+            EquipPickaxe();
+            LookAt(FarmingTarget);
+            Pawn->PawnStartFire(0);
+            LastFarmTime = CurrentTime;
+        } else {
+            bNeedsFarming = false;
+        }
+    }
+
+    // OGSM - Find nearest weapon pickup
+    inline AFortPickup* FindNearestWeaponPickup() {
+        if (!Pawn) return nullptr;
+
+        static auto PickupClass = AFortPickupAthena::StaticClass();
+        TArray<AActor*> Array;
+        UGameplayStatics::GetDefaultObj()->GetAllActorsOfClass(UWorld::GetWorld(), PickupClass, &Array);
+
+        AFortPickup* Nearest = nullptr;
+        float MinDist = FLT_MAX;
+
+        for (size_t i = 0; i < Array.Num(); i++) {
+            AFortPickup* Pickup = (AFortPickup*)Array[i];
+            if (Pickup->bHidden) continue;
+
+            auto Def = Pickup->PrimaryPickupItemEntry.ItemDefinition;
+            if (!Def) continue;
+
+            if (Def->IsA(UFortWeaponItemDefinition::StaticClass()) &&
+                !Def->IsA(UFortWeaponMeleeItemDefinition::StaticClass())) {
+
+                float Dist = Pawn->GetDistanceTo(Pickup);
+                if (Dist < MinDist && Dist < 5000.f) {
+                    MinDist = Dist;
+                    Nearest = Pickup;
+                }
+            }
+        }
+
+        Array.Free();
+        return Nearest;
+    }
+
+    // OGSM - Find nearest real player
+    inline AActor* FindNearestRealPlayer() {
+        if (!Pawn) return nullptr;
+
+        auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+        AActor* Nearest = nullptr;
+        float MinDist = FLT_MAX;
+
+        for (size_t i = 0; i < GameMode->AlivePlayers.Num(); i++) {
+            auto PC = GameMode->AlivePlayers[i];
+            if (!PC || !PC->Pawn) continue;
+
+            AFortPlayerStateAthena* PS = (AFortPlayerStateAthena*)PC->PlayerState;
+            if (PS && PS->bIsABot) continue;
+
+            float Dist = Pawn->GetDistanceTo(PC->Pawn);
+            if (Dist < MinDist) {
+                MinDist = Dist;
+                Nearest = PC->Pawn;
+            }
+        }
+
+        return Nearest;
+    }
+
+    // OGSM - Update lobby behavior for warmup
+    inline void UpdateLobbyBehavior() {
+        if (BotState != EBotState::Warmup) return;
+
+        float CurrentTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+
+        switch (LobbyState) {
+        case ELobbyBotState::Idle:
+            if (rand() % 100 < 30) {
+                LobbyState = ELobbyBotState::Moving;
+                FVector Target = Pawn->K2_GetActorLocation();
+                Target.X += (rand() % 2000) - 1000;
+                Target.Y += (rand() % 2000) - 1000;
+                PC->MoveToLocation(Target, 50.f, true, false, false, true, nullptr, true);
+            }
+            else if (rand() % 100 < 20) {
+                LobbyState = ELobbyBotState::Emoting;
+                Emote();
+                LobbyActionTimer = CurrentTime + 3.f;
+            }
+            else if (rand() % 100 < 25) {
+                TargetWeaponPickup = FindNearestWeaponPickup();
+                if (TargetWeaponPickup) {
+                    LobbyState = ELobbyBotState::PickingUpWeapon;
+                    PC->MoveToActor(TargetWeaponPickup, 100.f, true, false, true, nullptr, true);
+                }
+            }
+            break;
+
+        case ELobbyBotState::Moving:
+            if (PC->PathFollowingComponent && PC->PathFollowingComponent->DidMoveReachGoal()) {
+                LobbyState = ELobbyBotState::Idle;
+            }
+            break;
+
+        case ELobbyBotState::Emoting:
+            if (CurrentTime > LobbyActionTimer) {
+                LobbyState = ELobbyBotState::Idle;
+            }
+            break;
+
+        case ELobbyBotState::PickingUpWeapon:
+            if (TargetWeaponPickup && Pawn->GetDistanceTo(TargetWeaponPickup) < 300.f) {
+                Pickup((AFortPickup*)TargetWeaponPickup);
+                SimpleSwitchToWeapon();
+                LobbyState = ELobbyBotState::Shooting;
+                LobbyActionTimer = CurrentTime + 5.f;
+            }
+            break;
+
+        case ELobbyBotState::Shooting:
+            if (CurrentTime <= LobbyActionTimer) {
+                AActor* NearestPlayer = FindNearestRealPlayer();
+                if (NearestPlayer) {
+                    LookAt(NearestPlayer);
+                    Pawn->PawnStartFire(0);
+                }
+            } else {
+                Pawn->PawnStopFire(0);
+                LobbyState = ELobbyBotState::Idle;
+            }
+            break;
+        }
+    }
+
+    // OGSM - Update damage status (reset after delay)
+    inline void UpdateDamageStatus() {
+        float CurrentTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+        if (CurrentTime - LastDamageTime > 3.f) {
+            bIsUnderFire = false;
+            ConsecutiveShotsTaken = 0;
+        }
+    }
+
+    // OGSM - Fire with imperfection (human-like)
+    inline void FireWithImperfection(AActor* Target) {
+        if (!Pawn || !Target) return;
+
+        FVector TargetLoc = Target->K2_GetActorLocation();
+
+        float ErrorRange = (1.f - AimAccuracy) * 200.f;
+        TargetLoc.X += (rand() % (int)(ErrorRange * 2)) - ErrorRange;
+        TargetLoc.Y += (rand() % (int)(ErrorRange * 2)) - ErrorRange;
+        TargetLoc.Z += (rand() % (int)(ErrorRange * 2)) - ErrorRange;
+
+        float CurrentTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+
+        if (CurrentTime - LastAimTime > ReactionTime) {
+            FRotator AimRot = UKismetMathLibrary::FindLookAtRotation(
+                Pawn->K2_GetActorLocation(), TargetLoc);
+            PC->SetControlRotation(AimRot);
+            LastAimTime = CurrentTime;
+        }
+
+        if (bMakesMistakes && (rand() % 100) < (MistakeChance * 100)) {
+            return;
+        }
+
+        Pawn->PawnStartFire(0);
+    }
+
+    // OGSM - Post looting behavior
+    inline void PostLootBehavior() {
+        if (BotState != EBotState::Looting) return;
+
+        float Choice = (float)(rand() % 100) / 100.f;
+
+        if (Choice < 0.3f && HasEnoughResources(50)) {
+            BuildBox();
+        }
+        else if (Choice < 0.5f && bNeedsFarming) {
+            FarmTick();
+        }
+        else {
+            BotState = EBotState::LookingForPlayers;
+        }
+    }
+
+    // OGSM - Build box protection
+    inline void BuildBox() {
+        if (!Pawn || !HasEnoughResources(30)) return;
+
+        if (Globals::bBotBuildingEnabled) {
+            FVector BotLoc = Pawn->K2_GetActorLocation();
+            BotBuilding::BuildBoxAt(this, BotLoc);
+        }
+    }
 
 public:
     void OnDied(AFortPlayerStateAthena* KillerState, AActor* DamageCauser, FName BoneName)
@@ -993,79 +1348,159 @@ public:
 
 class BotsBTService_Warmup{
 public:
-    void DetermineBotWarmupChoice(PlayerBot* bot) {
-        if (UKismetMathLibrary::GetDefaultObj()->RandomBool()) {
-            bot->BotWarmupChoice = EBotWarmupChoice::Emote;
-        }
-        else {
-            bot->BotWarmupChoice = EBotWarmupChoice::MoveToPlayerEmote;
-        }
+    void Tick(PlayerBot* bot) {
+        // OGSM - Use new detailed lobby behavior
+        bot->UpdateLobbyBehavior();
+    }
+};
+};
+
+class BotsBTService_AIDropZone {
+
+    // OGSM - Check if location is in bus path
+    inline bool IsInBusPath(FVector Location) {
+        auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
+        AActor* Bus = GameState->GetAircraft(0);
+        if (!Bus) return true;
+
+        FVector BusLoc = Bus->K2_GetActorLocation();
+        FVector BusForward = Bus->GetActorForwardVector();
+
+        FVector ToPOI = Location - BusLoc;
+        ToPOI.Z = 0;
+        BusForward.Z = 0;
+
+        float DotProduct = (ToPOI.X * BusForward.X + ToPOI.Y * BusForward.Y);
+        return DotProduct > 0;
     }
 
-public:
-    void Tick(PlayerBot* bot) {
-        if (bot->BotWarmupChoice == EBotWarmupChoice::MAX) {
-            DetermineBotWarmupChoice(bot);
-        }
-        else if (bot->BotWarmupChoice == EBotWarmupChoice::Emote) {
-            if (bot->tick_counter % 300 == 0) {
-                bot->Emote();
-            }
-        }
-        else {
-            if (bot->tick_counter % 150 == 0) {
-                bot->NearestPlayerActor = bot->GetNearestPlayerActor();
-                auto BotPos = bot->Pawn->K2_GetActorLocation();
-                if (bot->NearestPlayerActor) {
-                    FVector Nearest = bot->NearestPlayerActor->K2_GetActorLocation();
-                    if (!Nearest.IsZero()) {
-                        float Dist = Math->Vector_Distance(BotPos, Nearest);
-                        if (Dist < 200.f + rand() % 300) {
-                            bot->LookAt(bot->NearestPlayerActor);
-                            if (UKismetMathLibrary::GetDefaultObj()->RandomBool()) {
-                                bot->Emote();
-                            }
-                        }
-                        else {
-                            bot->LookAt(bot->NearestPlayerActor);
-                            bot->PC->MoveToActor(bot->NearestPlayerActor, 100, true, false, true, nullptr, true);
+    // OGSM - Check if location is in future safe zone
+    inline bool IsInFutureSafeZone(FVector Location, AFortSafeZoneIndicator* CurrentSafeZone) {
+        if (!CurrentSafeZone) return true;
+
+        float Dist = Location.DistanceTo(CurrentSafeZone->NextCenter);
+        return Dist < CurrentSafeZone->NextRadius * 0.8f;
+    }
+
+    void ChooseDropZone(PlayerBot* bot) {
+        if (!bot->TargetDropZone.IsZero()) return;
+
+        auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
+        auto SafeZone = GameState->SafeZoneIndicator;
+
+        int32 Choice = rand() % 100;
+        FVector SelectedLocation;
+
+        // 40% chance - Grande ville avec Boss
+        if (Choice < 40 && !::BossPOIs.empty()) {
+            std::map<FString, int32> BotCountPerPOI;
+            for (auto& OtherBot : PlayerBotArray) {
+                if (OtherBot != bot && !OtherBot->TargetDropZone.IsZero()) {
+                    for (auto& POI : ::BossPOIs) {
+                        if (OtherBot->TargetDropZone.DistanceTo(POI.Location) < 2000.0f) {
+                            BotCountPerPOI[POI.Name]++;
                         }
                     }
                 }
             }
-        }
-    }
-};
 
-class BotsBTService_AIDropZone {
-public:
-    // OGSM - Chapter 2 Season 2 Boss POIs with priority
-    std::vector<std::pair<FVector, std::string>> BossPOIs = {
-        { FVector(6364, 4866, 69), "The Agency" },      // Midas
-        { FVector(113312, 113547, -1837), "The Yacht" }, // Deadpool
-        { FVector(106902, -84901, -1834), "The Shark" }, // Skye
-        { FVector(-19544, 105594, 69), "The Grotto" },  // Brutus
-        { FVector(-77143, -80634, 69), "The Rig" },     // TNTina
-        { FVector(-92971, 78709, 69), "The Fortilla" }  // Ocean
-    };
+            FBossPOI* BestPOI = nullptr;
+            int32 MinBots = 999;
 
-    void ChooseDropZone(PlayerBot* bot) {
-        if (DropZoneLocations.empty()) return;
-        
-        // OGSM - 40% chance to drop at a boss POI for vault runs
-        if (Globals::bVaultSystemEnabled && UKismetMathLibrary::RandomBoolWithWeight(0.4f)) {
-            auto BossLoc = BossPOIs[rand() % BossPOIs.size()];
-            bot->TargetDropZone = BossLoc.first;
-            Log("Bot targeting boss POI: " + BossLoc.second);
+            for (auto& POI : ::BossPOIs) {
+                int32 CurrentBots = BotCountPerPOI[POI.Name];
+                if (CurrentBots < POI.MaxBots && CurrentBots < MinBots) {
+                    if (IsInBusPath(POI.Location)) {
+                        MinBots = CurrentBots;
+                        BestPOI = &POI;
+                    }
+                }
+            }
+
+            if (BestPOI) {
+                SelectedLocation = BestPOI->Location;
+                bot->TargetBossPOI = BestPOI;
+                Log("Bot targeting boss POI: " + BestPOI->Name.ToString());
+            }
         }
+        // 35% chance - Moyenne ville avec toits
+        else if (Choice < 75 && !::MediumPOIs.empty()) {
+            std::map<FString, int32> BotCountPerPOI;
+            for (auto& OtherBot : PlayerBotArray) {
+                if (OtherBot != bot && !OtherBot->TargetDropZone.IsZero()) {
+                    for (auto& POI : ::MediumPOIs) {
+                        if (OtherBot->TargetDropZone.DistanceTo(POI.Center) < POI.Radius) {
+                            BotCountPerPOI[POI.Name]++;
+                        }
+                    }
+                }
+            }
+
+            FMediumPOI* BestPOI = nullptr;
+            int32 MinBots = 999;
+
+            for (auto& POI : ::MediumPOIs) {
+                int32 CurrentBots = BotCountPerPOI[POI.Name];
+                if (CurrentBots < POI.MaxBots && CurrentBots < MinBots) {
+                    if (IsInBusPath(POI.Center) && IsInFutureSafeZone(POI.Center, SafeZone)) {
+                        MinBots = CurrentBots;
+                        BestPOI = &POI;
+                    }
+                }
+            }
+
+            if (BestPOI) {
+                if (BestPOI->bHasRoofChests) {
+                    FRoofChestLocation* BestRoof = nullptr;
+                    float MinDist = FLT_MAX;
+
+                    for (auto& Roof : ::RoofChestLocations) {
+                        if (Roof.bIsAvailable && Roof.Location.DistanceTo(BestPOI->Center) < BestPOI->Radius) {
+                            float Dist = Roof.Location.DistanceTo(BestPOI->Center);
+                            if (Dist < MinDist) {
+                                MinDist = Dist;
+                                BestRoof = &Roof;
+                            }
+                        }
+                    }
+
+                    if (BestRoof) {
+                        SelectedLocation = BestRoof->Location;
+                        BestRoof->bIsAvailable = false;
+                        bot->bTargetingRoofChest = true;
+                        bot->RoofChestLocation = BestRoof->Location;
+                    } else {
+                        SelectedLocation = BestPOI->Center;
+                    }
+                } else {
+                    SelectedLocation = BestPOI->Center;
+                }
+                Log("Bot targeting medium POI: " + BestPOI->Name.ToString());
+            }
+        }
+        // 20% chance - Petite zone
+        else if (Choice < 95 && !::SmallPOIs.empty()) {
+            int32 Idx = rand() % ::SmallPOIs.size();
+            if (IsInFutureSafeZone(::SmallPOIs[Idx].Location, SafeZone)) {
+                SelectedLocation = ::SmallPOIs[Idx].Location;
+                Log("Bot targeting small POI: " + ::SmallPOIs[Idx].Name.ToString());
+            }
+        }
+        // 5% chance - Drop zone normale
         else {
-            bot->TargetDropZone = DropZoneLocations[rand() % DropZoneLocations.size()];
+            SelectedLocation = DropZoneLocations[rand() % DropZoneLocations.size()];
         }
 
-        // makes it more realisetic cause they dont clutter together
-        bot->TargetDropZone.X += Math->RandomFloatInRange(-800.f, 800.f);
-        bot->TargetDropZone.Y += Math->RandomFloatInRange(-800.f, 800.f);
+        if (SelectedLocation.IsZero()) {
+            SelectedLocation = DropZoneLocations[rand() % DropZoneLocations.size()];
+        }
+
+        bot->TargetDropZone.X = SelectedLocation.X + (rand() % 800) - 400;
+        bot->TargetDropZone.Y = SelectedLocation.Y + (rand() % 800) - 400;
+        bot->TargetDropZone.Z = SelectedLocation.Z;
     }
+
+public:
 
 public:
     void Tick(PlayerBot* bot) {
@@ -1545,6 +1980,10 @@ namespace PlayerBots {
             bot->PlayerState->bIsABot = true;
         }
 
+        
+        // OGSM - Initialize bot personality with variations
+        bot->InitializeBotPersonality();
+        bot->UpdateMaterialCounts();
         PlayerBotArray.push_back(bot); // gotta do this so we can tick them all
         //Log("Bot Spawned With DisplayName: " + bot->DisplayName.ToString());
     }
@@ -1579,6 +2018,12 @@ namespace PlayerBots {
             if (bot->BotState > EBotState::Bus) {
                 BotsBTService_AIEvaluator Evaluator;
                 Evaluator.Tick(bot); // tick the evaluator after the bot is out of the bus so we dont mess up anything or cause potential crash
+            }
+            
+            // OGSM - Update damage status and material counts
+            bot->UpdateDamageStatus();
+            if (bot->tick_counter % 120 == 0) {
+                bot->UpdateMaterialCounts();
             }
 
             if (bot->BotState == EBotState::Warmup) {
@@ -1658,8 +2103,40 @@ namespace PlayerBots {
                 }
             }
             else if (bot->BotState == EBotState::Looting) {
-                BotsBTService_Loot LootAI;
-                LootAI.Tick(bot);
+                // OGSM - Check if still needs to loot
+                if (!bot->HasGun() || !bot->TargetLootable) {
+                    BotsBTService_Loot LootAI;
+                    LootAI.Tick(bot);
+                } else {
+                    bot->PostLootBehavior();
+                }
+            }
+            else if (bot->BotState == EBotState::Looting) {
+                // OGSM - Check if still needs to loot
+                if (!bot->HasGun() || !bot->TargetLootable) {
+                    BotsBTService_Loot LootAI;
+                    LootAI.Tick(bot);
+                } else {
+                    bot->PostLootBehavior();
+                }
+            }
+            else if (bot->BotState == EBotState::Looting) {
+                // OGSM - Check if still needs to loot
+                if (!bot->HasGun() || !bot->TargetLootable) {
+                    BotsBTService_Loot LootAI;
+                    LootAI.Tick(bot);
+                } else {
+                    bot->PostLootBehavior();
+                }
+            }
+            else if (bot->BotState == EBotState::Looting) {
+                // OGSM - Check if still needs to loot
+                if (!bot->HasGun() || !bot->TargetLootable) {
+                    BotsBTService_Loot LootAI;
+                    LootAI.Tick(bot);
+                } else {
+                    bot->PostLootBehavior();
+                }
             }
             else if (bot->BotState == EBotState::LookingForPlayers) {
                 if (!bot->HasGun()) {
@@ -1682,6 +2159,12 @@ namespace PlayerBots {
                 // OGSM - Update building system
                 if (Globals::bBotBuildingEnabled) {
                     BotBuilding::UpdateBuildState(bot);
+                }
+                
+                // OGSM - Farm materials if needed
+                if (bot->bNeedsFarming) {
+                    bot->FarmTick();
+                    continue;
                 }
 
                 FVector BotLoc = bot->Pawn->K2_GetActorLocation();
