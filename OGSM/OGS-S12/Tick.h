@@ -242,7 +242,13 @@ namespace Tick {
 
         // OGSM - Tick player quest system
         if (Globals::bQuestSystemEnabled && GameState->GamePhase > EAthenaGamePhase::Warmup) {
-            QuestDistanceTracking::UpdateDistanceQuests();
+            if (GameMode) {
+                for (auto Player : GameMode->AlivePlayers) {
+                    if (Player) {
+                        Quests::UpdatePlayerDistanceTraveled(Player);
+                    }
+                }
+            }
             PlayerQuests::Tick();
         }
 
