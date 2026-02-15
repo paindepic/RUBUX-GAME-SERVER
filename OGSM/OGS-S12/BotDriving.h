@@ -1,6 +1,8 @@
 #pragma once
 #include "framework.h"
-#include "PlayerBots.h"
+
+// Forward declaration
+struct PlayerBot;
 
 enum class EBotVehicleState : uint8 {
     NoVehicle,
@@ -26,6 +28,17 @@ struct FVehicleInfo {
 };
 
 namespace BotDriving {
+    inline EVehicleType GetVehicleType(AActor* Vehicle);
+    inline bool IsVehicle(AActor* Actor);
+    inline AActor* FindNearestVehicle(PlayerBot* bot, float MaxDistance = 5000.0f);
+    inline bool ShouldUseVehicle(PlayerBot* bot, FVector TargetLocation);
+    inline bool EnterVehicle(PlayerBot* bot, AActor* Vehicle);
+    inline void ExitVehicle(PlayerBot* bot);
+    inline void DriveToLocation(PlayerBot* bot, FVector TargetLocation);
+    inline void CombatFlyChoppa(PlayerBot* bot, AActor* Target);
+    inline void UpdateVehicleState(PlayerBot* bot);
+    inline void DriveBoat(PlayerBot* bot, FVector TargetLocation);
+
     inline EVehicleType GetVehicleType(AActor* Vehicle) {
         if (!Vehicle) return EVehicleType::None;
 
@@ -261,3 +274,6 @@ namespace BotDriving {
         bot->Pawn->AddMovementInput(Direction, 1.0f, true);
     }
 }
+
+// Include PlayerBots.h after declarations to avoid circular dependencies
+#include "PlayerBots.h"
