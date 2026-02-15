@@ -4,6 +4,7 @@
 #include "POI_Locs.h"
 
 #include "Quests.h"
+#include "PlayerQuests.h"
 #include "Misc.h"
 #include "BotBuilding.h"
 #include "BotDriving.h"
@@ -192,6 +193,9 @@ public:
             Quests::GiveAccolade(KillerPC, StaticLoadObject<UFortAccoladeItemDefinition>("/Game/Athena/Items/Accolades/AccoladeId_012_Elimination.AccoladeId_012_Elimination"));
             Quests::GiveAccolade(KillerPC, GetDefFromEvent(EAccoladeEvent::Kill, KillerState->KillScore));
 
+
+            // OGSM - Update quest progress for eliminations
+            PlayerQuests::OnPlayerEliminatedBot(KillerPC, PlayerState);
             // giving assist accolade cuz idfk how to track assists
             Quests::GiveAccolade((AFortPlayerControllerAthena*)KillerState->Owner, StaticLoadObject<UFortAccoladeItemDefinition>("/Game/Athena/Items/Accolades/AccoladeId_013_Assist.AccoladeId_013_Assist"));
 

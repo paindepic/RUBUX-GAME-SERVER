@@ -382,4 +382,43 @@ namespace PlayerQuests {
             }
         }
     }
+
+    // OGSM - Quest hooks for player actions
+    inline void OnPlayerEliminatedBot(AFortPlayerControllerAthena* PC, AFortPlayerStateAthena* Victim)
+    {
+        if (!PC || !Victim) return;
+
+        std::string WeaponName = "Unknown";
+        if (PC->Pawn && PC->Pawn->CurrentWeapon && PC->Pawn->CurrentWeapon->WeaponData)
+        {
+            WeaponName = PC->Pawn->CurrentWeapon->WeaponData->GetName().ToString();
+        }
+
+        FQuestManager::Get().OnPlayerElimination(PC, Victim, WeaponName);
+
+        // Check if victim is a boss
+        if (Victim->bIsABot)
+        {
+            // Check for boss elimination quest
+            // This would require checking if the bot is a boss type
+        }
+    }
+
+    inline void OnPlayerOpenedChest(AFortPlayerControllerAthena* PC)
+    {
+        if (!PC) return;
+        FQuestManager::Get().OnChestOpened(PC);
+    }
+
+    inline void OnPlayerOpenedVault(AFortPlayerControllerAthena* PC)
+    {
+        if (!PC) return;
+        FQuestManager::Get().OnVaultOpened(PC);
+    }
+
+    inline void OnPlayerUsedVehicle(AFortPlayerControllerAthena* PC)
+    {
+        if (!PC) return;
+        FQuestManager::Get().OnVehicleUsed(PC);
+    }
 }

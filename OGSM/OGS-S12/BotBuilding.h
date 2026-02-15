@@ -1,6 +1,7 @@
 #pragma once
 #include "framework.h"
 #include "Building.h"
+#include "PlayerBots.h"
 
 enum class EBotBuildState : uint8 {
     Idle,
