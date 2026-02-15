@@ -6,6 +6,38 @@
 #include "Bots.h"
 #include "PlayerQuests.h"
 
+// Track player positions for distance quest
+namespace QuestDistanceTracking {
+    std::map<AFortPlayerControllerAthena*, FVector> LastPlayerPositions;
+
+    inline void UpdateDistanceQuests() {
+        auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+        if (!GameMode) return;
+
+        for (size_t i = 0; i < GameMode->AlivePlayers.Num(); i++) {
+            AFortPlayerControllerAthena* PC = GameMode->AlivePlayers[i];
+            if (!PC || !PC->Pawn) continue;
+
+            FVector CurrentPos = PC->Pawn->K2_GetActorLocation();
+
+            if (LastPlayerPositions.find(PC) != LastPlayerPositions.end()) {
+                FVector LastPos = LastPlayerPositions[PC];
+                float Distance = FVector::Distance(CurrentPos, LastPos);
+
+                if (Distance > 0.0f) {
+                    FQuestManager::Get().OnDistanceTraveled(PC, Distance);
+                }
+            }
+
+            LastPlayerPositions[PC] = CurrentPos;
+        }
+    }
+
+    inline void CleanupPlayer(AFortPlayerControllerAthena* PC) {
+        LastPlayerPositions.erase(PC);
+    }
+}
+
 namespace AccoladeTickingService {
     float NextPlaytimeXPDrop = 0.f;
 
@@ -210,6 +242,7 @@ namespace Tick {
 
         // OGSM - Tick player quest system
         if (Globals::bQuestSystemEnabled && GameState->GamePhase > EAthenaGamePhase::Warmup) {
+            QuestDistanceTracking::UpdateDistanceQuests();
             PlayerQuests::Tick();
         }
 

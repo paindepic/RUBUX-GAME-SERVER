@@ -1,5 +1,6 @@
 #pragma once
 #include "framework.h"
+#include "PlayerBots.h"
 
 enum class EBotVehicleState : uint8 {
     NoVehicle,
