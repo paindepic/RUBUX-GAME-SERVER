@@ -3,6 +3,9 @@
 #include "Quests.h"
 #include <ctime>
 
+// Disable deprecated gmtime warning
+#pragma warning(disable: 4996)
+
 enum class EQuestType : uint8 {
     Eliminations,
     OpenChests,
@@ -78,16 +81,22 @@ public:
 
     bool ShouldResetDaily() {
         time_t Now = time(nullptr);
-        struct tm LastReset = *gmtime(&LastDailyReset);
-        struct tm Current = *gmtime(&Now);
+        struct tm LastReset;
+        struct tm Current;
+        
+        gmtime_s(&LastReset, &LastDailyReset);
+        gmtime_s(&Current, &Now);
 
         return LastReset.tm_mday != Current.tm_mday;
     }
 
     bool ShouldResetWeekly() {
         time_t Now = time(nullptr);
-        struct tm LastReset = *gmtime(&LastWeeklyReset);
-        struct tm Current = *gmtime(&Now);
+        struct tm LastReset;
+        struct tm Current;
+        
+        gmtime_s(&LastReset, &LastWeeklyReset);
+        gmtime_s(&Current, &Now);
 
         int DaysDiff = (Current.tm_yday + (Current.tm_year * 365)) - (LastReset.tm_yday + (LastReset.tm_year * 365));
         return DaysDiff >= 7;
@@ -344,12 +353,10 @@ public:
     void ShowQuestNotification(AFortPlayerControllerAthena* PC, FQuestNotification& Notif) {
         if (!PC) return;
 
-        FText TitleText;
-        TitleText.TextData = (FTextData*)Notif.Title.c_str();
-
-        FText DescText;
-        DescText.TextData = (FTextData*)Notif.Description.c_str();
-
+        // Note: FText creation from strings requires proper FText::AsCultureInvariant or FTextStringGetter
+        // For now, we skip the FText creation and rely on the accolade system for UI
+        // The notification is still tracked in PendingNotifications
+        
         // Send to client via RPC
         // This would typically use a Client RPC to show UI
         // For now, we use the accolade system which already has UI
@@ -389,9 +396,14 @@ namespace PlayerQuests {
         if (!PC || !Victim) return;
 
         std::string WeaponName = "Unknown";
-        if (PC->Pawn && PC->Pawn->CurrentWeapon && PC->Pawn->CurrentWeapon->WeaponData)
+        if (PC->Pawn)
         {
-            WeaponName = PC->Pawn->CurrentWeapon->WeaponData->GetName().ToString();
+            // Cast to AFortPlayerPawnAthena to access CurrentWeapon
+            AFortPlayerPawnAthena* FortPawn = Cast<AFortPlayerPawnAthena>(PC->Pawn);
+            if (FortPawn && FortPawn->CurrentWeapon && FortPawn->CurrentWeapon->WeaponData)
+            {
+                WeaponName = FortPawn->CurrentWeapon->WeaponData->GetName().ToString();
+            }
         }
 
         FQuestManager::Get().OnPlayerElimination(PC, Victim, WeaponName);

@@ -1,7 +1,9 @@
 #pragma once
 #include "framework.h"
 #include "Building.h"
-#include "PlayerBots.h"
+
+// Forward declaration
+struct PlayerBot;
 
 enum class EBotBuildState : uint8 {
     Idle,
@@ -29,6 +31,15 @@ struct FBuildAction {
 };
 
 namespace BotBuilding {
+    inline void Build90s(PlayerBot* bot, int32 Steps = 3);
+    inline void BuildBoxFight(PlayerBot* bot, FVector Center);
+    inline void BuildRampRush(PlayerBot* bot, int32 Steps = 4);
+    inline void BuildTurtle(PlayerBot* bot);
+    inline void BuildHighGroundRetake(PlayerBot* bot, AActor* Target);
+    inline bool ShouldBuildForHighGround(PlayerBot* bot, AActor* Target);
+    inline bool ShouldBoxUp(PlayerBot* bot);
+    inline void UpdateBuildState(PlayerBot* bot);
+
     inline UFortItemDefinition* GetBuildMaterial(AFortPlayerControllerAthena* PC) {
         static UFortItemDefinition* WoodDef = StaticLoadObject<UFortItemDefinition>("/Game/Items/ResourcePickups/WoodItemData.WoodItemData");
         static UFortItemDefinition* StoneDef = StaticLoadObject<UFortItemDefinition>("/Game/Items/ResourcePickups/StoneItemData.StoneItemData");
@@ -326,3 +337,6 @@ namespace BotBuilding {
         }
     }
 }
+
+// Include PlayerBots.h after declarations to avoid circular dependencies
+#include "PlayerBots.h"
