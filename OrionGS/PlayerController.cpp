@@ -31,7 +31,19 @@ void PlayerController::ServerAcknowledgePossession(APlayerController* PlayerCont
 }
 
 static bool AllPlayersConnected(AFortGameModeAthena* GameMode) {
-    // im lazy asf atm
+    if (!GameMode)
+        return false;
+        
+    auto GameState = Utils::Cast<AFortGameStateAthena>(GameMode->GameState);
+    if (!GameState)
+        return false;
+    
+    // Check if we have any players at all
+    if (GameState->PlayerArray.Num() == 0)
+        return false;
+    
+    // Allow start if at least one player is ready for SOLO mode
+    // This enables the SOLO button to work properly
     return true;
 }
 
@@ -53,12 +65,15 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
 
     static auto AbilitySet = UObject::FindObject<UFortAbilitySet>("GAS_AthenaPlayer.GAS_AthenaPlayer");
 
-    for (int i = 0; i < AbilitySet->GameplayAbilities.Num(); i++)
+    if (AbilitySet)
     {
-        if (((AFortPlayerStateAthena*)PlayerController->PlayerState)->AbilitySystemComponent)
+        for (int i = 0; i < AbilitySet->GameplayAbilities.Num(); i++)
         {
-            if (AbilitySet->GameplayAbilities[i].Get())
-                PlayerController::Abilities::GiveAbility(((AFortPlayerStateAthena*)PlayerController->PlayerState)->AbilitySystemComponent, AbilitySet->GameplayAbilities[i].Get(), nullptr);
+            if (PlayerController->PlayerState && ((AFortPlayerStateAthena*)PlayerController->PlayerState)->AbilitySystemComponent)
+            {
+                if (AbilitySet->GameplayAbilities[i].Get())
+                    PlayerController::Abilities::GiveAbility(((AFortPlayerStateAthena*)PlayerController->PlayerState)->AbilitySystemComponent, AbilitySet->GameplayAbilities[i].Get(), nullptr);
+            }
         }
     }
 
@@ -67,7 +82,12 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
     if (!PlayerState)
         return;
 
+    if (!GameState)
+        return;
+
     auto Playlist = GameState->CurrentPlaylistInfo.BasePlaylist;
+    if (!Playlist)
+        return;
 
     for (auto& SoftModifier : Playlist->ModifierList)
     {
@@ -80,33 +100,39 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
         {
             for (auto& SoftAbilitySet : AbilitySetInfo.AbilitySets)
             {
-                FString WStrSet = UKismetStringLibrary::Conv_NameToString(SoftModifier.ObjectID.AssetPathName);
+                FString WStrSet = UKismetStringLibrary::Conv_NameToString(SoftAbilitySet.ObjectID.AssetPathName);
                 UFortAbilitySet* Set = StaticLoadObject<UFortAbilitySet>(WStrSet.ToString());
                 WStrSet.Free();
                 if (!Set)
                     continue;
-                for (auto Ability : Set->GameplayAbilities)
+                if (PlayerState->AbilitySystemComponent)
                 {
-                    Abilities::GiveAbility(PlayerState->AbilitySystemComponent, Ability.Get());
-                }
-                for (auto Effect : Set->GrantedGameplayEffects)
-                {
-                    if (!Effect.GameplayEffect.Get())
-                        continue;
-                    PlayerState->AbilitySystemComponent->BP_ApplyGameplayEffectToSelf(Effect.GameplayEffect, Effect.Level, PlayerState->AbilitySystemComponent->MakeEffectContext());
+                    for (auto Ability : Set->GameplayAbilities)
+                    {
+                        if (Ability.Get())
+                            Abilities::GiveAbility(PlayerState->AbilitySystemComponent, Ability.Get());
+                    }
+                    for (auto Effect : Set->GrantedGameplayEffects)
+                    {
+                        if (!Effect.GameplayEffect.Get())
+                            continue;
+                        PlayerState->AbilitySystemComponent->BP_ApplyGameplayEffectToSelf(Effect.GameplayEffect, Effect.Level, PlayerState->AbilitySystemComponent->MakeEffectContext());
+                    }
                 }
             }
         }
-        
-        for (auto& EffectInfo : Modifier->PersistentGameplayEffects)
+
+        if (PlayerState->AbilitySystemComponent)
         {
-            for (auto& bruh : EffectInfo.GameplayEffects)
+            for (auto& EffectInfo : Modifier->PersistentGameplayEffects)
             {
-                FString WStrSet = UKismetStringLibrary::Conv_NameToString(bruh.GameplayEffect.ObjectID.AssetPathName);
-                auto EffectClass = StaticLoadObject<UClass>(WStrSet.ToString());
-                WStrSet.Free();
-                if (!EffectClass)
-                    continue;
+                for (auto& bruh : EffectInfo.GameplayEffects)
+                {
+                    FString WStrSet = UKismetStringLibrary::Conv_NameToString(bruh.GameplayEffect.ObjectID.AssetPathName);
+                    auto EffectClass = StaticLoadObject<UClass>(WStrSet.ToString());
+                    WStrSet.Free();
+                    if (!EffectClass)
+                        continue;
                 PlayerState->AbilitySystemComponent->BP_ApplyGameplayEffectToSelf(EffectClass, bruh.Level, PlayerState->AbilitySystemComponent->MakeEffectContext());
             }
         }
@@ -209,8 +235,16 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
     ptr.ObjectIndex = PlayerState->Index;
     ptr.ObjectSerialNumber = UObject::GObjects->GetSerialByIdx(PlayerState->Index);
     cout << "Serial " << ptr.ObjectSerialNumber << endl;
-    Array[TeamIndex].ElementData.Add(ptr);
-    ArraySquad[PlayerState->SquadId].ElementData.Add(ptr);
+    
+    if (TeamIndex >= 0 && TeamIndex < Array.Num())
+    {
+        Array[TeamIndex].ElementData.Add(ptr);
+    }
+    
+    if (PlayerState->SquadId >= 0 && PlayerState->SquadId < ArraySquad.Num())
+    {
+        ArraySquad[PlayerState->SquadId].ElementData.Add(ptr);
+    }
 
     //Array.Add(ptr);
 
@@ -260,9 +294,26 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
             TArray<AActor*> PlayerStarts;
             UGameplayStatics::GetAllActorsOfClass(UWorld::GetWorld(), AFortPlayerStartWarmup::StaticClass(), &PlayerStarts);
             auto GameSession = Utils::Cast<AFortGameSessionDedicatedAthena>(GameMode->GameSession);
-            int32 BotsToSpawn = Utils::Cast<AFortGameStateAthena>(GameMode->GameState)->CurrentPlaylistInfo.BasePlaylist->MaxPlayers - GameMode->AlivePlayers.Num();
+            auto GameStateAthena = Utils::Cast<AFortGameStateAthena>(GameMode->GameState);
+            
+            if (!GameStateAthena || !GameStateAthena->CurrentPlaylistInfo.BasePlaylist) {
+                PlayerStarts.Free();
+                return;
+            }
+            
+            int32 BotsToSpawn = GameStateAthena->CurrentPlaylistInfo.BasePlaylist->MaxPlayers - GameMode->AlivePlayers.Num();
+            int32 NumPlayerStarts = PlayerStarts.Num();
+            
+            if (NumPlayerStarts == 0) {
+                PlayerStarts.Free();
+                return;
+            }
+            
             for (size_t i = 0; i < BotsToSpawn; i++) {
-                auto start = PlayerStarts.At(i);
+                auto start = PlayerStarts.At(i % NumPlayerStarts);
+                if (!start) {
+                    continue;
+                }
                 //auto start = PlayerStarts[UKismetMathLibrary::RandomIntegerInRange(0, PlayerStarts.Num() - 1)];
                 FTransform Transform{};
                 Transform.Translation = start->K2_GetActorLocation();
@@ -369,16 +420,28 @@ void PlayerController::ServerLoadingScreenDropped(AFortPlayerController* PlayerC
         UFortKismetLibrary::UpdatePlayerCustomCharacterPartsVisualization(PlayerState);
     }
     auto GameMode = Utils::Cast<AFortGameModeAthena>(UWorld::GetWorld()->AuthorityGameMode);
-    for (size_t i = 0; i < GameMode->StartingItems.Num(); i++)
+    if (GameMode)
     {
-        auto& Item = GameMode->StartingItems[i];
-        Inventory::GiveItem(PlayerController, Item.Item, Item.Count);
+        for (size_t i = 0; i < GameMode->StartingItems.Num(); i++)
+        {
+            auto& Item = GameMode->StartingItems[i];
+            if (Item.Item)
+                Inventory::GiveItem(PlayerController, Item.Item, Item.Count);
+        }
     }
-    Inventory::GiveItem(PlayerController, PlayerController->CosmeticLoadoutPC.Pickaxe->WeaponDefinition);
-    ((AFortPlayerControllerAthena*)PlayerController)->XPComponent->bRegisteredWithQuestManager = true;
-    ((AFortPlayerControllerAthena*)PlayerController)->XPComponent->OnRep_bRegisteredWithQuestManager();
-    PlayerState->SeasonLevelUIDisplay = ((AFortPlayerControllerAthena*)PlayerController)->XPComponent->CurrentLevel;
-    PlayerState->OnRep_SeasonLevelUIDisplay();
+    
+    if (PlayerController->CosmeticLoadoutPC.Pickaxe)
+    {
+        Inventory::GiveItem(PlayerController, PlayerController->CosmeticLoadoutPC.Pickaxe->WeaponDefinition);
+    }
+    
+    if (((AFortPlayerControllerAthena*)PlayerController)->XPComponent)
+    {
+        ((AFortPlayerControllerAthena*)PlayerController)->XPComponent->bRegisteredWithQuestManager = true;
+        ((AFortPlayerControllerAthena*)PlayerController)->XPComponent->OnRep_bRegisteredWithQuestManager();
+        PlayerState->SeasonLevelUIDisplay = ((AFortPlayerControllerAthena*)PlayerController)->XPComponent->CurrentLevel;
+        PlayerState->OnRep_SeasonLevelUIDisplay();
+    }
     static bool First = false;
 
     auto test = (UFortControllerComponent_InventoryService*)PlayerController->GetComponentByClass(UFortControllerComponent_InventoryService::StaticClass());

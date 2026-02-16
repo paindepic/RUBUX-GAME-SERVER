@@ -52,6 +52,8 @@ void GameMode::HandleNewSafeZonePhase(AFortGameModeAthena* GameMode, int32 ZoneI
     static auto Accolade = StaticLoadObject<UFortAccoladeItemDefinition>("/Game/Athena/Items/Accolades/AccoladeID_SurviveStormCircle.AccoladeID_SurviveStormCircle");
     for (auto PC : GameMode->AlivePlayers)
     {
+        if (!PC)
+            continue;
         XP::Accolades::GiveAccolade(PC, Accolade, nullptr, EXPEventPriorityType::NearReticle);
         bool bruh;
         FGameplayTagContainer Empty{};
@@ -62,8 +64,11 @@ void GameMode::HandleNewSafeZonePhase(AFortGameModeAthena* GameMode, int32 ZoneI
     if (!LateGame)
     {
         HandleNewSafeZonePhaseOG(GameMode, ZoneIndex);
-        GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime = UGameplayStatics::GetTimeSeconds(UWorld::GetWorld()) + WaitTimes[GameMode->SafeZonePhase];
-        GameMode->SafeZoneIndicator->SafeZoneFinishShrinkTime = GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime + Durations[GameMode->SafeZonePhase];
+        if (GameMode->SafeZoneIndicator && GameMode->SafeZonePhase >= 0 && GameMode->SafeZonePhase < WaitTimes.Num() && GameMode->SafeZonePhase < Durations.Num())
+        {
+            GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime = UGameplayStatics::GetTimeSeconds(UWorld::GetWorld()) + WaitTimes[GameMode->SafeZonePhase];
+            GameMode->SafeZoneIndicator->SafeZoneFinishShrinkTime = GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime + Durations[GameMode->SafeZonePhase];
+        }
     }
     else
     {
@@ -72,14 +77,20 @@ void GameMode::HandleNewSafeZonePhase(AFortGameModeAthena* GameMode, int32 ZoneI
         GameStateAsFort->SafeZonePhase = 4;
         GameStateAsFort->OnRep_SafeZonePhase();
         HandleNewSafeZonePhaseOG(GameMode, ZoneIndex);
-        GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime = UGameplayStatics::GetTimeSeconds(UWorld::GetWorld()) + WaitTimes[GameMode->SafeZonePhase];
-        GameMode->SafeZoneIndicator->SafeZoneFinishShrinkTime = GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime + Durations[GameMode->SafeZonePhase];
+        if (GameMode->SafeZoneIndicator && GameMode->SafeZonePhase >= 0 && GameMode->SafeZonePhase < WaitTimes.Num() && GameMode->SafeZonePhase < Durations.Num())
+        {
+            GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime = UGameplayStatics::GetTimeSeconds(UWorld::GetWorld()) + WaitTimes[GameMode->SafeZonePhase];
+            GameMode->SafeZoneIndicator->SafeZoneFinishShrinkTime = GameMode->SafeZoneIndicator->SafeZoneStartShrinkTime + Durations[GameMode->SafeZonePhase];
+        }
     }
 }
 
 template<typename T>
 T* GetClosestActor(AActor* FromActor, float Max = 500)
 {
+    if (!FromActor)
+        return nullptr;
+
     TArray<AActor*> ActorArray;
     UGameplayStatics::GetAllActorsOfClass(UWorld::GetWorld(), T::StaticClass(), &ActorArray);
     AActor* Ret = nullptr;
@@ -385,8 +396,16 @@ bool GameMode::ReadyToStartMatch(AFortGameModeAthena* GameMode)
         }
 
         SpawnMachines.Free();
-        GameMode->GameSession->MaxPlayers = 100;
-        printf("GameState->PoiManager->PoiTagContainerTable: %d\n", GameState->PoiManager->PoiTagContainerTable.Num());
+        
+        if (GameMode->GameSession)
+        {
+            GameMode->GameSession->MaxPlayers = 100;
+        }
+        
+        if (GameState->PoiManager)
+        {
+            printf("GameState->PoiManager->PoiTagContainerTable: %d\n", GameState->PoiManager->PoiTagContainerTable.Num());
+        }
     }
 
     if (GameState->TotalPlayers > 0) {
@@ -427,6 +446,12 @@ void GameMode::InitializeForWorld(UNavigationSystemV1* NavSystem, UWorld* World,
 void GameMode::OnAircraftEnteredDropZone(AFortGameModeAthena* GameMode, AFortAthenaAircraft* Aircraft)
 {
     auto GameState = ((AFortGameStateAthena*)UWorld::GetWorld()->GameState);
+    if (!GameState)
+    {
+        OnAircraftEnteredDropZoneOG(GameMode, Aircraft);
+        return;
+    }
+    
     static bool First = false;
     if (!First)
     {
@@ -434,6 +459,8 @@ void GameMode::OnAircraftEnteredDropZone(AFortGameModeAthena* GameMode, AFortAth
         GameState->GamePhaseStep = EAthenaGamePhaseStep::BusFlying;
         for (auto Bot : GameMode->AliveBots)
         {
+            if (!Bot || !Bot->Blackboard)
+                continue;
             static auto Name1 = UKismetStringLibrary::Conv_StringToName(TEXT("AIEvaluator_Global_GamePhaseStep"));
             static auto Name2 = UKismetStringLibrary::Conv_StringToName(TEXT("AIEvaluator_Global_GamePhase"));
             Bot->Blackboard->SetValueAsEnum(Name1, (uint8)GameState->GamePhaseStep);
@@ -450,6 +477,12 @@ void GameMode::OnAircraftEnteredDropZone(AFortGameModeAthena* GameMode, AFortAth
 void GameMode::OnAircraftExitedDropZone(AFortGameModeAthena* GameMode, AFortAthenaAircraft* Aircraft)
 {
     auto GameState = ((AFortGameStateAthena*)UWorld::GetWorld()->GameState);
+    if (!GameState)
+    {
+        OnAircraftExitedDropZoneOG(GameMode, Aircraft);
+        return;
+    }
+    
     static bool First = false;
     if (!First)
     {
@@ -457,6 +490,8 @@ void GameMode::OnAircraftExitedDropZone(AFortGameModeAthena* GameMode, AFortAthe
         GameState->GamePhaseStep = EAthenaGamePhaseStep::StormHolding;
         for (auto Bot : GameMode->AliveBots)
         {
+            if (!Bot || !Bot->Blackboard)
+                continue;
             static auto Name1 = UKismetStringLibrary::Conv_StringToName(TEXT("AIEvaluator_Global_GamePhaseStep"));
             static auto Name2 = UKismetStringLibrary::Conv_StringToName(TEXT("AIEvaluator_Global_GamePhase"));
             Bot->Blackboard->SetValueAsEnum(Name1, (uint8)GameState->GamePhaseStep);
