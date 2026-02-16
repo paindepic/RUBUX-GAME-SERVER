@@ -57,8 +57,8 @@ inline bool LateGame = false;
 template<typename T>
 inline T* StaticLoadObject(std::string name)
 {
-    auto Name = std::wstring(name.begin(), name.end()).c_str();
-    return (T*)StaticLoadObjectOG(T::StaticClass(), nullptr, Name, nullptr, 0, nullptr, false, nullptr);
+    std::wstring wname(name.begin(), name.end());
+    return (T*)StaticLoadObjectOG(T::StaticClass(), nullptr, wname.c_str(), nullptr, 0, nullptr, false, nullptr);
 }
 
 inline EConversationRequirementResult(*CheckRequirementsOG)(UConversationTaskNode* Node, FConversationContext& InContext);/* = decltype(CheckRequirements)(InSDKUtils::GetImageBase() + 0xD5D740);*/
@@ -174,10 +174,12 @@ namespace Utils
             if (!Object)
                 continue;
 
-            if (Object->GetFullName().contains("Default"))
+            std::string FullName = Object->GetFullName();
+
+            if (FullName.find("Default") != std::string::npos)
                 continue;
 
-            if (Object->GetFullName().contains("Test"))
+            if (FullName.find("Test") != std::string::npos)
                 continue;
 
             if (Object->IsA(Class) && !Object->IsDefaultObject())

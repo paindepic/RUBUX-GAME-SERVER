@@ -799,14 +799,17 @@ void SetExtraDataValue(FConversationBranchPoint& BranchPoint, string Name, strin
 		string NameStr = ExtraData.Name.ToString();
 		if (NameStr == Name)
 		{
-			ExtraData.Value = wstring(Value.begin(), Value.end()).c_str();
+			std::wstring wvalue(Value.begin(), Value.end());
+			ExtraData.Value = wvalue.c_str();
 			return;
 		}
 	}
 
 	FConversationNodeParameterPair Pair{};
-	Pair.Name = wstring(Name.begin(), Name.end()).c_str();
-	Pair.Value = wstring(Value.begin(), Value.end()).c_str();
+	std::wstring wname(Name.begin(), Name.end());
+	Pair.Name = wname.c_str();
+	std::wstring wvalue2(Value.begin(), Value.end());
+	Pair.Value = wvalue2.c_str();
 }
 
 FConversationTaskResult ExecuteTaskNode(UConversationTaskNode* TaskNode, FConversationContext& InContext)
