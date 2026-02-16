@@ -28,7 +28,7 @@ using namespace SDK;
 
 // hello, i do not like coding, here is a small pseudo code
 void ServerSendZiplineStateHook(AFortPlayerPawn* Pawn, FZiplinePawnState InZiplineState) {
-    if (!InZiplineState.Zipline)
+    if (!Pawn || !InZiplineState.Zipline)
         return;
     //joel fix or gay
     //static int MAX_ZIPLINE_DISTANCE = 50; // Seems way too high, i have to do some tests ingame!
@@ -53,7 +53,7 @@ void ServerSendZiplineStateHook(AFortPlayerPawn* Pawn, FZiplinePawnState InZipli
     //} else {
     //    // Well, uh in that case calculate how far he has come and uh yea then calculate it back to get that shit? :skull:
     //    // (Easier, just check if he's on a straight line, uh, i should have been more active when we discussed vectors in school :skull:)
-    //    
+    //
     //    // First check, Z
     //    auto LowestPoint = min(ZiplineEndPosition.Z, ZiplineStartLoc.Z);
     //    auto HighestPoint = max(ZiplineEndPosition.Z, ZiplineStartLoc.Z);
@@ -66,7 +66,7 @@ void ServerSendZiplineStateHook(AFortPlayerPawn* Pawn, FZiplinePawnState InZipli
     //        return; // Not allowed to zipline!
     //    }
 
-    //    // X, Y to be done 
+    //    // X, Y to be done
     //}
 
     Pawn->ZiplineState = InZiplineState;
@@ -80,7 +80,13 @@ void ServerSendZiplineStateHook(AFortPlayerPawn* Pawn, FZiplinePawnState InZipli
         float ZiplineJumpStrength = 0;
         UDataTableFunctionLibrary::EvaluateCurveTableRow(Pawn->ZiplineJumpDampening.CurveTable, Pawn->ZiplineJumpDampening.RowName, 0, &res, &ZiplineJumpDampening, FString());
         UDataTableFunctionLibrary::EvaluateCurveTableRow(Pawn->ZiplineJumpStrength.CurveTable, Pawn->ZiplineJumpStrength.RowName, 0, &res, &ZiplineJumpStrength, FString());
-        FVector Velocity = Pawn->CharacterMovement->Velocity;
+        
+        FVector Velocity{ 0, 0, 0 };
+        if (Pawn->CharacterMovement)
+        {
+            Velocity = Pawn->CharacterMovement->Velocity;
+        }
+        
         FVector LaunchVelocity = FVector{ -750, -750, ZiplineJumpStrength };
 
         if (ZiplineJumpDampening * Velocity.X >= -750.f)
@@ -103,18 +109,26 @@ static void WaitForLogin() {
     FName Frontend = UKismetStringLibrary::Conv_StringToName(L"Frontend");
     FName MatchState = UKismetStringLibrary::Conv_StringToName(L"InProgress");
 
-    while (true) {
+    int timeoutSeconds = 120; // 2 minute timeout to prevent infinite loop
+    int elapsedSeconds = 0;
+
+    while (elapsedSeconds < timeoutSeconds) {
         UWorld* CurrentWorld = ((UWorld*)UWorld::GetWorld());
         if (CurrentWorld) {
             if (CurrentWorld->Name == Frontend) {
                 auto GameMode = (AGameMode*)CurrentWorld->AuthorityGameMode;
-                if (GameMode->GetMatchState() == MatchState) {
+                if (GameMode && GameMode->GetMatchState() == MatchState) {
                     break;
                 }
             }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        elapsedSeconds++;
+    }
+
+    if (elapsedSeconds >= timeoutSeconds) {
+        Utils::Log("Warning: WaitForLogin timed out after 120 seconds, continuing anyway...");
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000 * 1));
@@ -163,10 +177,21 @@ DWORD InitThread(LPVOID)
     Utils::Log("OrionGS is starting now!");
     __int64 BaseAddr = __int64(GetModuleHandleW(0));
     std::cout << std::format("ModuleBase: 0x{:x}", BaseAddr);
-    
+
     // Wait until the Engine is loaded!
-    while (UEngine::GetEngine() == 0)
+    int engineTimeoutSeconds = 60; // 1 minute timeout
+    int engineElapsedSeconds = 0;
+
+    while (UEngine::GetEngine() == 0 && engineElapsedSeconds < engineTimeoutSeconds)
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        engineElapsedSeconds++;
+    }
+
+    if (engineElapsedSeconds >= engineTimeoutSeconds) {
+        Utils::Log("Error: Engine failed to load after 60 seconds!");
+        return 0;
+    }
 
     UFortEngine* Engine = Utils::Cast<UFortEngine>(UEngine::GetEngine());
     std::cout << std::format("FortEngine Object: 0x{:x}", __int64(UEngine::GetEngine()));
