@@ -22,7 +22,7 @@ void NetDriver::TickFlush(UNetDriver* NetDriver)
                 {
                     BusLaunched = true;
                     GameState->GamePhase = EAthenaGamePhase::Aircraft;
-                    GameState->OnRep_GamePhase();
+                    GameState->GamePhaseStep = EAthenaGamePhaseStep::BusLocked;
 
                     for (auto PlayerState : GameState->PlayerArray)
                     {
