@@ -435,12 +435,12 @@ bool GameMode::ReadyToStartMatch(AFortGameModeAthena* GameMode)
     return false;
 }
 
-APawn* GameMode::SpawnDefaultPawnFor(AGameModeBase* GameModeBase, AController* NewPlayer, AActor* StartSpot)
+APawn* GameMode::SpawnDefaultPawnFor(AGameModeBase* GameModeBase, AController* PlayerController, AActor* StartSpot)
 {
-    if (!NewPlayer || !StartSpot)
+    if (!PlayerController || !StartSpot)
         return nullptr;
 
-    auto Ret = GameModeBase->SpawnDefaultPawnAtTransform(NewPlayer, (FTransform&)StartSpot->GetTransform());
+    auto Ret = GameModeBase->SpawnDefaultPawnAtTransform(PlayerController, (FTransform&)StartSpot->GetTransform());
     return Ret;
 }
 

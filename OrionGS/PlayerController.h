@@ -5,19 +5,19 @@ using namespace std;
 
 namespace PlayerController
 {
-    inline void (*ClientOnPawnDiedOG)(APlayerController* PlayerController, FFortPlayerDeathReport);
+    extern void (*ClientOnPawnDiedOG)(APlayerController* PlayerController, FFortPlayerDeathReport);
+    extern void (*GetPlayerViewPointOG)(APlayerController* PlayerController, FVector outLocation, FRotator outRotation);
+    extern void (*ServerReadyToStartMatchOG)(AFortPlayerController* PlayerController);
+    extern __int64 (*OnDamageServerOG)(ABuildingSMActor* Actor, float Damage, FGameplayTagContainer DamageTags, FVector Momentum, FHitResult HitInfo, AFortPlayerControllerAthena* InstigatedBy, AActor* DamageCauser, FGameplayEffectContextHandle EffectContext);
+    extern void (*ServerLoadingScreenDroppedOG)(AFortPlayerController* PlayerController);
+    extern void (*ServerSetInAircraftOG)(AFortPlayerStateAthena* PlayerState, bool bInAircraft);
 
     void ServerAcknowledgePossession(APlayerController* PlayerController, APawn* Pawn);
     bool AllPlayersConnected(AFortGameModeAthena* GameMode);
-    inline void (*GetPlayerViewPointOG)(APlayerController* PlayerController, FVector outLocation, FRotator outRotation);
-
     void GetPlayerViewPoint(APlayerController* PlayerController, FVector& outLocation, FRotator& outRotation);
     void ClientOnPawnDied(AFortPlayerControllerAthena* PlayerController, FFortPlayerDeathReport);
-    inline void (*ServerReadyToStartMatchOG)(AFortPlayerController* PlayerController);
-    inline __int64 (*OnDamageServerOG)(ABuildingSMActor* Actor, float Damage, FGameplayTagContainer DamageTags, FVector Momentum, FHitResult HitInfo, AFortPlayerControllerAthena* InstigatedBy, AActor* DamageCauser, FGameplayEffectContextHandle EffectContext);
     void ServerReadyToStartMatch(AFortPlayerController* PlayerController);
     void ServerAttemptAircraftJump(UFortControllerComponent_Aircraft* Comp, FRotator ClientRot);
-    inline void (*ServerLoadingScreenDroppedOG)(AFortPlayerController* PlayerController);
     void ServerLoadingScreenDropped(AFortPlayerController* PlayerController);
     void ServerPlayEmoteItemHook(AFortPlayerController* PlayerController, UFortItemDefinition* EmoteAsset, float EmoteRandomNumber);
     void ServerExecuteInventoryItem(AFortPlayerController* PC, FGuid Guid);
@@ -35,11 +35,12 @@ namespace PlayerController
 
     namespace Abilities
     {
-        inline FGameplayAbilitySpecHandle(*GiveAbilityOG)(UAbilitySystemComponent* AbilitySystemComponent, FGameplayAbilitySpecHandle* OutHandle, FGameplayAbilitySpec NewSpec);
+        extern FGameplayAbilitySpecHandle(*GiveAbilityOG)(UAbilitySystemComponent* AbilitySystemComponent, FGameplayAbilitySpecHandle* OutHandle, FGameplayAbilitySpec NewSpec);
+        extern bool (*InternalTryActivateAbility)(UAbilitySystemComponent* AbilitySystemComp, FGameplayAbilitySpecHandle AbilityToActivate, FPredictionKey InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData);
+
         FGameplayAbilitySpecHandle GiveAbility(UAbilitySystemComponent* AbilitySystemComponent, UClass* AbilityClass, UObject* SourceObject = nullptr, bool RemoveAfterActivation = false);
         FGameplayAbilitySpec* FindAbilityFromSpecHandle(UAbilitySystemComponent* AbilitySystemComponent, FGameplayAbilitySpecHandle& Handle);
         FGameplayAbilitySpec* FindAbilityFromClass(UAbilitySystemComponent* AbilitySystemComponent, UClass* Class);
-        inline bool (*InternalTryActivateAbility)(UAbilitySystemComponent* AbilitySystemComp, FGameplayAbilitySpecHandle AbilityToActivate, FPredictionKey InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData) = decltype(InternalTryActivateAbility)(__int64(GetModuleHandleW(0)) + 0xC42BB0);
         void InternalServerTryActivateAbilityHook(UAbilitySystemComponent* AbilitySystemComponent, FGameplayAbilitySpecHandle Handle, bool InputPressed, FPredictionKey& PredictionKey, FGameplayEventData* TriggerEventData);
     }
 }

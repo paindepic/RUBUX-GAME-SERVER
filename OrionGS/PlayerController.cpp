@@ -6,6 +6,16 @@
 #include <iostream>
 #include <fstream>
 
+void (*PlayerController::ClientOnPawnDiedOG)(APlayerController* PlayerController, FFortPlayerDeathReport) = nullptr;
+void (*PlayerController::GetPlayerViewPointOG)(APlayerController* PlayerController, FVector outLocation, FRotator outRotation) = nullptr;
+void (*PlayerController::ServerReadyToStartMatchOG)(AFortPlayerController* PlayerController) = nullptr;
+__int64 (*PlayerController::OnDamageServerOG)(ABuildingSMActor* Actor, float Damage, FGameplayTagContainer DamageTags, FVector Momentum, FHitResult HitInfo, AFortPlayerControllerAthena* InstigatedBy, AActor* DamageCauser, FGameplayEffectContextHandle EffectContext) = nullptr;
+void (*PlayerController::ServerLoadingScreenDroppedOG)(AFortPlayerController* PlayerController) = nullptr;
+void (*PlayerController::ServerSetInAircraftOG)(AFortPlayerStateAthena* PlayerState, bool bInAircraft) = nullptr;
+
+FGameplayAbilitySpecHandle (*PlayerController::Abilities::GiveAbilityOG)(UAbilitySystemComponent* AbilitySystemComponent, FGameplayAbilitySpecHandle* OutHandle, FGameplayAbilitySpec NewSpec) = nullptr;
+bool (*PlayerController::Abilities::InternalTryActivateAbility)(UAbilitySystemComponent* AbilitySystemComp, FGameplayAbilitySpecHandle AbilityToActivate, FPredictionKey InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData) = decltype(InternalTryActivateAbility)(__int64(GetModuleHandleW(0)) + 0xC42BB0);
+
 void PlayerController::GetPlayerViewPoint(APlayerController* PC, FVector& outLocation, FRotator& outRotation)
 {
     auto PCViewTarget = PC->GetViewTarget();
