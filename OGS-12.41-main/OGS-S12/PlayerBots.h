@@ -1762,7 +1762,7 @@ namespace PlayerBots {
                 
                 // Strategic landing
                 if (Globals::bStrategicLandingEnabled && bot->BotState == EBotState::Bus && bot->TargetDropZone.IsZero()) {
-                    FVector BusLoc = bot->PC->GetPawn()->K2_GetActorLocation();
+                    FVector BusLoc = bot->PC->Pawn->K2_GetActorLocation();
                     bot->TargetDropZone = POIUtils::GetStrategicDropZone(BusLoc, 0.0f, bot->bPreferHotDrop);
                 }
             }
