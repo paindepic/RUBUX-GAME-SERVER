@@ -129,7 +129,7 @@ inline FRotator FQuatToRot(FQuat Quat)
     return RotatorFromQuat;
 }
 
-inline int GetOffset(UObject* Object, string name)
+inline int GetOffset(UObject* Object, const string& name)
 {
     FProperty* Property = nullptr;
 
