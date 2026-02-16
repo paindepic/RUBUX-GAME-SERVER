@@ -278,7 +278,6 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
                 // Increment TotalPlayers for each bot spawned to ensure the bus launches
                 GameState->TotalPlayers++;
             }
-            GameState->OnRep_TotalPlayers();
 
             PlayerStarts.Free();
         }
@@ -947,10 +946,9 @@ void PlayerController::ServerCheat(AFortPlayerControllerAthena* PC, FString msg)
                 // Increment TotalPlayers for each bot spawned to ensure the bus launches
                 GameState->TotalPlayers++;
             }
-            GameState->OnRep_TotalPlayers();
             PlayerStarts.Free();
         }
-        
+
     }
 }
 
