@@ -187,7 +187,7 @@ bool GameMode::ReadyToStartMatch(AFortGameModeAthena* GameMode)
             //auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_DefaultDuo.Playlist_DefaultDuo");
             //auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_Low_Solo.Playlist_Low_Solo");
             //auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_Vamp_Solo.Playlist_Vamp_Solo");
-            auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_DefaultDuo.Playlist_DefaultDuo");
+            auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_DefaultSolo.Playlist_DefaultSolo");
             //auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_ShowdownTournament_Vendetta_Solo.Playlist_ShowdownTournament_Vendetta_Solo");
             //auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_ShowdownTournament_Vendetta_Solo.Playlist_ShowdownTournament_Vendetta_Solo");
             //auto Playlist = UObject::FindObject<UFortPlaylistAthena>("Playlist_Melt_Duos.Playlist_Melt_Duos");
@@ -391,15 +391,16 @@ bool GameMode::ReadyToStartMatch(AFortGameModeAthena* GameMode)
 
     if (GameState->TotalPlayers > 0) {
         if (!GameState->GameSessionId.IsValid()) {
-            printf("WHAT SKUNKY SHIT IS THIS?!\n");
-            exit(1);
+            printf("GameSessionId invalid, continuing without backend session.\n");
         }
         #ifdef USING_EZAntiCheat
             FEasyAntiCheatServer::Get()->BeginSession();
             FEasyAntiCheatServer::Get()->SetGameSessionId(GameState->GameSessionId);
         #endif
 
-        GameState->WarmupCountdownEndTime = 90.f;
+        if (GameState->WarmupCountdownEndTime <= 0.f) {
+            GameState->WarmupCountdownEndTime = UGameplayStatics::GetTimeSeconds(UWorld::GetWorld()) + 90.f;
+        }
         
         return true;
     }
