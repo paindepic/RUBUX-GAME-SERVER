@@ -92,7 +92,7 @@ namespace Quests {
                             PC->XPComponent->MatchXp, PC->XPComponent->TotalXpEarned);
                     }
                     
-                    Log("Quest completed: " + std::string(TCHAR_TO_UTF8(*Quest.Description.ToString())));
+                    Log("Quest completed: " + std::string( Quest.Description.ToString()));
                 }
                 break;
             }
@@ -107,7 +107,8 @@ namespace Quests {
         Accolade.AccoladeDef = Def;
         Accolade.Count = 1;
         std::string DefName = Def->GetName();
-        Accolade.TemplateId = std::wstring(DefName.begin(), DefName.end()).c_str();
+        std::wstring WideDefName(DefName.begin(), DefName.end());
+        Accolade.TemplateId = WideDefName.c_str();
 
         auto ID = UKismetSystemLibrary::GetDefaultObj()->GetPrimaryAssetIdFromObject(Def);
 
