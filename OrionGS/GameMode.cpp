@@ -314,6 +314,14 @@ bool GameMode::ReadyToStartMatch(AFortGameModeAthena* GameMode)
         CharacterItemDefs = Utils::GetAllObjectsOfClass<UAthenaCharacterItemDefinition>();
         BackpackItemDefs = Utils::GetAllObjectsOfClass<UAthenaBackpackItemDefinition>();
         EmoteItemDefs = Utils::GetAllObjectsOfClass<UAthenaDanceItemDefinition>();
+
+        if (CharacterItemDefs.empty())
+            printf("Warning: CharacterItemDefs is empty!\n");
+        if (EmoteItemDefs.empty())
+            printf("Warning: EmoteItemDefs is empty!\n");
+        if (BackpackItemDefs.empty())
+            printf("Warning: BackpackItemDefs is empty!\n");
+
         ((UAthenaAISystem*)UWorld::GetWorld()->AISystem)->PlayerBotManager = GameMode->ServerBotManager;
     }
     

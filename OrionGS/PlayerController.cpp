@@ -30,18 +30,19 @@ void PlayerController::ServerAcknowledgePossession(APlayerController* PlayerCont
     PlayerController->AcknowledgedPawn = Pawn;
 }
 
-static bool AllPlayersConnected(AFortGameModeAthena* GameMode) {
+bool PlayerController::AllPlayersConnected(AFortGameModeAthena* GameMode)
+{
     if (!GameMode)
         return false;
-        
+
     auto GameState = Utils::Cast<AFortGameStateAthena>(GameMode->GameState);
     if (!GameState)
         return false;
-    
+
     // Check if we have any players at all
     if (GameState->PlayerArray.Num() == 0)
         return false;
-    
+
     // Allow start if at least one player is ready for SOLO mode
     // This enables the SOLO button to work properly
     return true;
@@ -60,7 +61,7 @@ void PlayerController::ServerReadyToStartMatch(AFortPlayerController* PlayerCont
         }
 
         // Start making sure that the player is running the Anti Cheat, not running = kick after 40 secs
-        FEasyAntiCheatServer::Get()->OnClientConnect(NewPlayer);
+        FEasyAntiCheatServer::Get()->OnClientConnect(PlayerController);
     #endif
 
     static auto AbilitySet = UObject::FindObject<UFortAbilitySet>("GAS_AthenaPlayer.GAS_AthenaPlayer");

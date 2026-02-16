@@ -201,14 +201,23 @@ void Misc::OnPawnAISpawnedHook(AActor* Controller, AFortPlayerPawnAthena* Pawn)
 				BotPC->Blackboard->SetValueAsEnum(Name2, (uint8)EAthenaGamePhase::Warmup);
 
 				auto BotPlayerState = (AFortPlayerStateAthena*)Pawn->PlayerState;
-				for (size_t i = 0; i < EmoteItemDefs.size(); i++)
+				if (!EmoteItemDefs.empty())
 				{
-					BotPC->CosmeticLoadoutBC.Dances.Add(EmoteItemDefs.at(i));
+					for (size_t i = 0; i < EmoteItemDefs.size(); i++)
+					{
+						BotPC->CosmeticLoadoutBC.Dances.Add(EmoteItemDefs.at(i));
+					}
 				}
-				BotPC->CosmeticLoadoutBC.Character = CharacterItemDefs.at(UKismetMathLibrary::RandomIntegerInRange(0, CharacterItemDefs.size() - 1));
-				while (!BotPC->CosmeticLoadoutBC.Character)
+				if (!CharacterItemDefs.empty())
 				{
 					BotPC->CosmeticLoadoutBC.Character = CharacterItemDefs.at(UKismetMathLibrary::RandomIntegerInRange(0, CharacterItemDefs.size() - 1));
+					int attempts = 0;
+					const int maxAttempts = 5;
+					while (!BotPC->CosmeticLoadoutBC.Character && attempts < maxAttempts)
+					{
+						BotPC->CosmeticLoadoutBC.Character = CharacterItemDefs.at(UKismetMathLibrary::RandomIntegerInRange(0, CharacterItemDefs.size() - 1));
+						attempts++;
+					}
 				}
 				if (BotPC->CosmeticLoadoutBC.Character)
 				{
