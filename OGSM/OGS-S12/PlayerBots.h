@@ -18,17 +18,25 @@ static std::vector<UAthenaSkyDiveContrailItemDefinition*> Contrails{};
 inline std::vector<UAthenaDanceItemDefinition*> Dances{};
 
 enum class EBotState : uint8 {
-    Warmup,
-    PreBus, // Dont handle this, just there to stop bots from killing eachother before bus enters dropzone
+    Warmup,             // Lobby
+    PreBus,
     Bus,
-    Skydiving,
+    Skydiving,          // Plongee directe
     Gliding,
     Landed,
     Fleeing,
     Looting,
     LookingForPlayers,
     MovingToSafeZone,
-    Stuck
+    Stuck,
+    BuildFighting,      // Combat avec builds
+    TakingHighGround,   // Construction vers le haut
+    DrivingVehicle,     // Conduite Choppa/Bateau
+    FightingBoss,       // Combat contre Midas/etc
+    OpeningVault,       // Ouverture vault
+    FarmingMaterials,   // Farming
+    Healing,            // Soin
+    Retreating          // Retraite strategique
 };
 
 enum class EBotWarmupChoice {
@@ -40,6 +48,37 @@ enum class EBotWarmupChoice {
 enum class EBotStrafeType {
     StrafeLeft,
     StrafeRight
+};
+
+enum class EBotBuildStrategy {
+    None,
+    NinetyUp,
+    BoxFight,
+    RampRush,
+    Turtle,
+    HighGroundRetake,
+    DefensiveWall
+};
+
+enum class EVehicleType {
+    None,
+    Choppa,
+    Boat
+};
+
+enum class EPOIType {
+    None,
+    Boss,
+    Medium,
+    Small
+};
+
+enum class ELobbyBotState {
+    Idle,
+    Moving,
+    Emoting,
+    PickingUpWeapon,
+    Shooting
 };
 
 enum class ELootableType {
@@ -126,25 +165,371 @@ public:
     float LastLootTargetDistance = 0.f;
 
     // OGSM Chapter 2 Season 2 - New AI Fields
-    // Building system
+    // ============================================================================
+    // SYSTEME DE COMBAT AVANCE (utilisant UFortAthenaAIBotAttackingSkillSet)
+    // ============================================================================
+    float AggressionLevel = 0.5f;           // 0.0 - 1.0
+    float ReactionTime = 0.2f;              // Temps de reaction
+    float AimAccuracy = 0.85f;              // Precision de visee
+    bool bMakesMistakes = true;             // Fait des erreurs comme humain
+    float MistakeChance = 0.1f;             // 10% erreurs
+    int32 ShotsFiredWithoutBuilding = 0;    // Compteur pour build fights
+    float LastCombatTime = 0.f;
+    AActor* CurrentCombatTarget = nullptr;
+    bool bWantsHighGround = false;
+
+    // ============================================================================
+    // SYSTEME DE BUILDING (utilisant UFortAthenaAIBotBuildingSkillSet)
+    // ============================================================================
     EBotBuildState BuildState = EBotBuildState::Idle;
     bool bIsBuilding = false;
+    int32 WoodCount = 0;
+    int32 StoneCount = 0;
+    int32 MetalCount = 0;
     float LastBuildTime = 0.f;
     int32 BuildMaterialCount = 0;
+    FVector BuildTargetLocation = FVector();
+    EBotBuildStrategy CurrentBuildStrategy = EBotBuildStrategy::None;
+    int32 BuildSequenceStep = 0;
+    float BuildSequenceStartTime = 0.f;
 
-    // Vehicle system
+    // ============================================================================
+    // SYSTEME DE VEHICULES (Choppa + Bateaux)
+    // ============================================================================
     AActor* CurrentVehicle = nullptr;
+    bool bIsInVehicle = false;
+    float VehicleEnterTime = 0.f;
+    EVehicleType CurrentVehicleType = EVehicleType::None;
     EBotVehicleState VehicleState = EBotVehicleState::NoVehicle;
     FVector VehicleTargetLocation = FVector();
 
-    // Vault system
+    // ============================================================================
+    // SYSTEME DE VAULT (Boss + Cartes + Coffres mythiques)
+    // ============================================================================
     EVaultState VaultState = EVaultState::None;
     EBossType TargetBoss = EBossType::None;
     bool bHasKeycard = false;
+    UFortItemDefinition* CurrentKeycard = nullptr;
+    bool bWantsToOpenVault = false;
+    FBossPOI* TargetVault = nullptr;
+    bool bIsFightingBoss = false;
+    AActor* CurrentBossTarget = nullptr;
+    float BossFightStartTime = 0.f;
 
-    // Strategic dropping
-    bool bTargetingRoofChest = false;
-    FVector RoofChestLocation = FVector();
+    // ============================================================================
+    // SYSTEME D'ATTERRISSAGE AVANCE
+    // ============================================================================
+    bool bShouldDiveDirect = true;
+    float DiveStartTime = 0.f;
+    bool bWantsRoofChest = false;
+    FVector TargetRoofLocation = FVector();
+    EPOIType AssignedPOIType = EPOIType::None;
+    FString AssignedPOIName;
+
+    // ============================================================================
+    // SYSTEME DE DEFENSE REACTIVE
+    // ============================================================================
+    float LastDamageTime = 0.f;
+    FVector LastDamageDirection = FVector();
+    bool bIsUnderFire = false;
+    int32 ConsecutiveShotsTaken = 0;
+    float PanicBuildTime = 0.f;
+
+    // ============================================================================
+    // SYSTEME DE FARMING
+    // ============================================================================
+    bool bNeedsFarming = false;
+    AActor* FarmingTarget = nullptr;
+    float LastFarmTime = 0.f;
+    float FarmingStartTime = 0.f;
+    int32 FarmingTargetAmount = 300;
+
+    // ============================================================================
+    // SYSTEME DE LOBBY
+    // ============================================================================
+    ELobbyBotState LobbyState = ELobbyBotState::Idle;
+    float LobbyActionTimer = 0.f;
+    AFortPickup* TargetWeaponPickup = nullptr;
+    float LobbyIdleTime = 0.f;
+
+    // ============================================================================
+    // METHODES DE BUILDING
+    // ============================================================================
+    inline bool HasEnoughResources(int32 Amount) {
+        return (WoodCount + StoneCount + MetalCount) >= Amount;
+    }
+
+    inline void UpdateMaterialCounts() {
+        if (!PC || !PC->Inventory) return;
+        WoodCount = StoneCount = MetalCount = 0;
+        for (int32 i = 0; i < PC->Inventory->Inventory.ReplicatedEntries.Num(); i++) {
+            auto& Entry = PC->Inventory->Inventory.ReplicatedEntries[i];
+            if (!Entry.ItemDefinition) continue;
+            std::string Name = Entry.ItemDefinition->Name.ToString();
+            if (Name.contains("Wood")) WoodCount = Entry.Count;
+            else if (Name.contains("Stone")) StoneCount = Entry.Count;
+            else if (Name.contains("Metal")) MetalCount = Entry.Count;
+        }
+        bNeedsFarming = (WoodCount + StoneCount + MetalCount) < 200;
+    }
+
+    inline void Perform90s() {
+        if (!Pawn || !HasEnoughResources(30)) return;
+        CurrentBuildStrategy = EBotBuildStrategy::NinetyUp;
+        BuildSequenceStep = 0;
+        BuildSequenceStartTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+    }
+
+    inline void BuildBox() {
+        if (!Pawn || !HasEnoughResources(50)) return;
+        CurrentBuildStrategy = EBotBuildStrategy::BoxFight;
+        BuildSequenceStep = 0;
+    }
+
+    inline void BuildRampRush() {
+        if (!Pawn || !HasEnoughResources(40)) return;
+        CurrentBuildStrategy = EBotBuildStrategy::RampRush;
+        BuildSequenceStep = 0;
+    }
+
+    inline void BuildDefensiveWall(FVector ThreatDir) {
+        if (!Pawn || !HasEnoughResources(10)) return;
+        CurrentBuildStrategy = EBotBuildStrategy::DefensiveWall;
+        LastDamageDirection = ThreatDir;
+    }
+
+    inline bool ShouldTakeHighGround(AActor* Enemy) {
+        if (!Pawn || !Enemy) return false;
+        FVector BotLoc = Pawn->K2_GetActorLocation();
+        FVector EnemyLoc = Enemy->K2_GetActorLocation();
+        return (EnemyLoc.Z - BotLoc.Z > 150.0f) && HasEnoughResources(80);
+    }
+
+    inline bool ShouldBoxUp() {
+        return bIsStressed && HasEnoughResources(50);
+    }
+
+    // ============================================================================
+    // METHODES DE COMBAT
+    // ============================================================================
+    inline void FireWithHumanImperfection(AActor* Target) {
+        if (!Pawn || !Target || !PC) return;
+
+        FVector TargetLoc = Target->K2_GetActorLocation();
+        float ErrorRange = (1.0f - AimAccuracy) * 150.0f;
+        TargetLoc.X += (rand() % (int)(ErrorRange * 2)) - ErrorRange;
+        TargetLoc.Y += (rand() % (int)(ErrorRange * 2)) - ErrorRange;
+        TargetLoc.Z += (rand() % (int)(ErrorRange * 2)) - ErrorRange;
+
+        FRotator AimRot = UKismetMathLibrary::FindLookAtRotation(Pawn->K2_GetActorLocation(), TargetLoc);
+        PC->SetControlRotation(AimRot);
+
+        if (bMakesMistakes && (rand() % 100) < (int)(MistakeChance * 100)) return;
+
+        Pawn->PawnStartFire(0);
+    }
+
+    inline void SwitchToBestWeaponForDistance(float Distance) {
+        WeaponSwitchByDistance(Distance);
+    }
+
+    inline void CrouchSpam() {
+        if (!Pawn) return;
+        static float LastCrouch = 0;
+        float Now = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+        if (Now - LastCrouch > 0.25f) {
+            Pawn->bIsCrouched ? Pawn->UnCrouch(false) : Pawn->Crouch(false);
+            LastCrouch = Now;
+        }
+    }
+
+    // ============================================================================
+    // METHODES DE VEHICULE
+    // ============================================================================
+    inline bool ShouldUseVehicle(FVector Target) {
+        if (!Pawn || bIsInVehicle) return false;
+        return Target.DistanceTo(Pawn->K2_GetActorLocation()) > 2000.0f;
+    }
+
+    inline void EnterVehicle(AActor* Vehicle) {
+        if (!Pawn || !Vehicle) return;
+        CurrentVehicle = Vehicle;
+        bIsInVehicle = true;
+        VehicleEnterTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+    }
+
+    inline void DriveToLocationVehicle(FVector Target) {
+        if (!Pawn || !bIsInVehicle) return;
+        VehicleTargetLocation = Target;
+    }
+
+    // ============================================================================
+    // METHODES DE DEFENSE REACTIVE
+    // ============================================================================
+    inline void OnTakeDamage(float Damage, AActor* DamageCauser, FVector HitDir) {
+        (void)Damage;
+        (void)DamageCauser;
+        LastDamageTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+        LastDamageDirection = HitDir;
+        bIsUnderFire = true;
+        ConsecutiveShotsTaken++;
+
+        if (HasEnoughResources(10)) BuildDefensiveWall(HitDir);
+        if (ConsecutiveShotsTaken >= 3 && HasEnoughResources(50)) BuildBox();
+
+        if (BotState == EBotState::LookingForPlayers) {
+            CachedBotState = BotState;
+            BotState = EBotState::BuildFighting;
+        }
+    }
+
+    // ============================================================================
+    // METHODES DE FARMING
+    // ============================================================================
+    inline AActor* FindFarmableObject() {
+        if (!Pawn) return nullptr;
+        return nullptr;
+    }
+
+    inline void FarmTick() {
+        if (!bNeedsFarming || !Pawn) return;
+    }
+
+    // ============================================================================
+    // METHODES DE LOBBY
+    // ============================================================================
+    inline void UpdateLobbyBehavior() {
+        if (BotState != EBotState::Warmup) return;
+
+        float Now = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+
+        switch (LobbyState) {
+            case ELobbyBotState::Idle:
+                if (rand() % 100 < 30) {
+                    FVector Target = Pawn->K2_GetActorLocation();
+                    Target.X += (rand() % 2000) - 1000;
+                    Target.Y += (rand() % 2000) - 1000;
+                    PC->MoveToLocation(Target, 50.f, true, false, false, true, nullptr, true);
+                    LobbyState = ELobbyBotState::Moving;
+                } else if (rand() % 100 < 20) {
+                    Emote();
+                    LobbyState = ELobbyBotState::Emoting;
+                    LobbyActionTimer = Now + 3.f;
+                } else if (rand() % 100 < 25) {
+                    TargetWeaponPickup = FindNearestWeaponPickup();
+                    if (TargetWeaponPickup) {
+                        PC->MoveToActor(TargetWeaponPickup, 100.f, true, false, true, nullptr, true);
+                        LobbyState = ELobbyBotState::PickingUpWeapon;
+                    }
+                }
+                break;
+
+            case ELobbyBotState::PickingUpWeapon:
+                if (TargetWeaponPickup && Pawn->GetDistanceTo(TargetWeaponPickup) < 300.f) {
+                    Pickup(TargetWeaponPickup);
+                    SimpleSwitchToWeapon();
+                    LobbyState = ELobbyBotState::Shooting;
+                    LobbyActionTimer = Now + 5.f;
+                }
+                break;
+
+            case ELobbyBotState::Shooting:
+                if (Now <= LobbyActionTimer) {
+                    AActor* NearestPlayer = FindNearestRealPlayer();
+                    if (NearestPlayer) {
+                        LookAt(NearestPlayer);
+                        Pawn->PawnStartFire(0);
+                    }
+                } else {
+                    Pawn->PawnStopFire(0);
+                    LobbyState = ELobbyBotState::Idle;
+                }
+                break;
+
+            case ELobbyBotState::Emoting:
+                if (Now > LobbyActionTimer) LobbyState = ELobbyBotState::Idle;
+                break;
+
+            case ELobbyBotState::Moving:
+                if (PC->PathFollowingComponent && PC->PathFollowingComponent->DidMoveReachGoal()) {
+                    LobbyState = ELobbyBotState::Idle;
+                }
+                break;
+        }
+    }
+
+    inline AFortPickup* FindNearestWeaponPickup() {
+        if (!Pawn) return nullptr;
+        static auto PickupClass = AFortPickupAthena::StaticClass();
+        TArray<AActor*> Array;
+        UGameplayStatics::GetDefaultObj()->GetAllActorsOfClass(UWorld::GetWorld(), PickupClass, &Array);
+
+        AFortPickupAthena* Nearest = nullptr;
+        for (size_t i = 0; i < Array.Num(); i++) {
+            auto Pickup = (AFortPickupAthena*)Array[i];
+            if (!Pickup || Pickup->bHidden) continue;
+            if (!Pickup->PrimaryPickupItemEntry.ItemDefinition) continue;
+            if (!Pickup->PrimaryPickupItemEntry.ItemDefinition->IsA(UFortWeaponItemDefinition::StaticClass())) continue;
+            if (!Nearest || Pickup->GetDistanceTo(Pawn) < Nearest->GetDistanceTo(Pawn)) {
+                Nearest = Pickup;
+            }
+        }
+        Array.Free();
+        return Nearest;
+    }
+
+    inline AActor* FindNearestRealPlayer() {
+        if (!Pawn) return nullptr;
+        auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
+        AActor* Nearest = nullptr;
+        float MinDist = FLT_MAX;
+
+        for (auto Player : GameMode->AlivePlayers) {
+            if (!Player || !Player->Pawn) continue;
+            AFortPlayerStateAthena* PS = (AFortPlayerStateAthena*)Player->PlayerState;
+            if (PS && PS->bIsABot) continue;
+
+            float Dist = Pawn->GetDistanceTo(Player->Pawn);
+            if (Dist < MinDist) {
+                MinDist = Dist;
+                Nearest = Player->Pawn;
+            }
+        }
+        return Nearest;
+    }
+
+    // ============================================================================
+    // METHODES DE BOSS FIGHT
+    // ============================================================================
+    inline void StartBossFight(AActor* Boss) {
+        if (!Boss) return;
+        CurrentBossTarget = Boss;
+        bIsFightingBoss = true;
+        BossFightStartTime = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+        BotState = EBotState::FightingBoss;
+    }
+
+    inline void UpdateBossFight() {
+        if (!bIsFightingBoss || !CurrentBossTarget) return;
+
+        if (ShouldTakeHighGround(CurrentBossTarget)) {
+            Perform90s();
+        }
+
+        if (bIsStressed) BuildBox();
+
+        FireWithHumanImperfection(CurrentBossTarget);
+    }
+
+    // ============================================================================
+    // INITIALISATION PERSONNALITE
+    // ============================================================================
+    inline void InitializeBotPersonality() {
+        ReactionTime = 0.15f + (rand() % 25) / 100.0f;
+        AimAccuracy = 0.65f + (rand() % 35) / 100.0f;
+        AggressionLevel = 0.3f + (rand() % 50) / 100.0f;
+        MistakeChance = 0.05f + (rand() % 15) / 100.0f;
+    }
 
 public:
     void OnDied(AFortPlayerStateAthena* KillerState, AActor* DamageCauser, FName BoneName)
@@ -196,6 +581,13 @@ public:
 
             // OGSM - Update quest progress for eliminations
             PlayerQuests::OnPlayerEliminatedBot(KillerPC, PlayerState);
+
+            if (bIsFightingBoss && CurrentBossTarget) {
+                Quests::UpdatePlayerQuestProgress(KillerPC, Quests::EPlayerQuestType::EliminateBoss, 1);
+            } else {
+                Quests::UpdatePlayerQuestProgress(KillerPC, Quests::EPlayerQuestType::Eliminations, 1);
+            }
+
             // giving assist accolade cuz idfk how to track assists
             Quests::GiveAccolade((AFortPlayerControllerAthena*)KillerState->Owner, StaticLoadObject<UFortAccoladeItemDefinition>("/Game/Athena/Items/Accolades/AccoladeId_013_Assist.AccoladeId_013_Assist"));
 
@@ -545,19 +937,6 @@ public:
 
         if (BestWeapon && Pawn->CurrentWeapon && Pawn->CurrentWeapon->WeaponData != BestWeapon) {
             Pawn->EquipWeaponDefinition(BestWeapon, BestWeaponGuid);
-        }
-    }
-
-    // OGSM - Crouch spam during combat
-    void CrouchSpam() {
-        if (!Pawn || bIsDead) return;
-        
-        if (UKismetMathLibrary::RandomBoolWithWeight(0.15f)) {
-            if (Pawn->bIsCrouched) {
-                Pawn->UnCrouch(false);
-            } else {
-                Pawn->Crouch(false);
-            }
         }
     }
 
@@ -1039,40 +1418,80 @@ public:
 
 class BotsBTService_AIDropZone {
 public:
-    // OGSM - Chapter 2 Season 2 Boss POIs with priority
-    std::vector<std::pair<FVector, std::string>> BossPOIs = {
-        { FVector(6364, 4866, 69), "The Agency" },      // Midas
-        { FVector(113312, 113547, -1837), "The Yacht" }, // Deadpool
-        { FVector(106902, -84901, -1834), "The Shark" }, // Skye
-        { FVector(-19544, 105594, 69), "The Grotto" },  // Brutus
-        { FVector(-77143, -80634, 69), "The Rig" },     // TNTina
-        { FVector(-92971, 78709, 69), "The Fortilla" }  // Ocean
-    };
-
     void ChooseDropZone(PlayerBot* bot) {
-        if (DropZoneLocations.empty()) return;
-        
-        // OGSM - 40% chance to drop at a boss POI for vault runs
-        if (Globals::bVaultSystemEnabled && UKismetMathLibrary::RandomBoolWithWeight(0.4f)) {
-            auto BossLoc = BossPOIs[rand() % BossPOIs.size()];
-            bot->TargetDropZone = BossLoc.first;
-            Log("Bot targeting boss POI: " + BossLoc.second);
-        }
-        else {
-            bot->TargetDropZone = DropZoneLocations[rand() % DropZoneLocations.size()];
+        if (!bot || !bot->TargetDropZone.IsZero()) return;
+
+        auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
+        auto SafeZone = GameState->SafeZoneIndicator;
+
+        int32 Choice = rand() % 100;
+        FVector Selected;
+
+        if (Choice < 40 && !BossPOIs.empty()) {
+            FBossPOI* Best = nullptr;
+            int32 MinCount = 999;
+
+            for (auto& POI : BossPOIs) {
+                if (!IsLocationInBusPath(POI.Location)) continue;
+                int32 Count = CountBotsInPOI(POI.Location, 2000.f);
+                if (Count < POI.MaxBots && Count < MinCount) {
+                    MinCount = Count;
+                    Best = &POI;
+                }
+            }
+
+            if (Best) {
+                Selected = Best->Location;
+                bot->AssignedPOIType = EPOIType::Boss;
+                bot->AssignedPOIName = Best->Name;
+                bot->TargetVault = Best;
+                bot->bWantsToOpenVault = true;
+            }
+        } else if (Choice < 75 && !MediumPOIs.empty()) {
+            FMediumPOI* Best = nullptr;
+            int32 MinCount = 999;
+
+            for (auto& POI : MediumPOIs) {
+                if (!IsLocationInBusPath(POI.Center)) continue;
+                if (!IsInFutureSafeZone(POI.Center, SafeZone)) continue;
+                int32 Count = CountBotsInPOI(POI.Center, POI.Radius);
+                if (Count < POI.MaxBots && Count < MinCount) {
+                    MinCount = Count;
+                    Best = &POI;
+                }
+            }
+
+            if (Best) {
+                if (Best->bHasRoofChests && !Best->RoofChestLocations.empty()) {
+                    Selected = Best->RoofChestLocations[rand() % Best->RoofChestLocations.size()];
+                    bot->bWantsRoofChest = true;
+                } else {
+                    Selected = Best->Center;
+                }
+                bot->AssignedPOIType = EPOIType::Medium;
+                bot->AssignedPOIName = Best->Name;
+            }
+        } else if (Choice < 95 && !SmallPOIs.empty()) {
+            auto& POI = SmallPOIs[rand() % SmallPOIs.size()];
+            if (IsInFutureSafeZone(POI.Location, SafeZone)) {
+                Selected = POI.Location;
+                bot->AssignedPOIType = EPOIType::Small;
+                bot->AssignedPOIName = POI.Name;
+            }
+        } else if (!DropZoneLocations.empty()) {
+            Selected = DropZoneLocations[rand() % DropZoneLocations.size()];
         }
 
-        // makes it more realisetic cause they dont clutter together
-        bot->TargetDropZone.X += Math->RandomFloatInRange(-800.f, 800.f);
-        bot->TargetDropZone.Y += Math->RandomFloatInRange(-800.f, 800.f);
+        bot->TargetDropZone.X = Selected.X + (rand() % 800) - 400;
+        bot->TargetDropZone.Y = Selected.Y + (rand() % 800) - 400;
+        bot->TargetDropZone.Z = Selected.Z;
     }
 
-public:
     void Tick(PlayerBot* bot) {
         auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
         auto Math = (UKismetMathLibrary*)UKismetMathLibrary::StaticClass()->DefaultObject;
-        auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
-        auto Statics = (UGameplayStatics*)UGameplayStatics::StaticClass()->DefaultObject;
+
+        if (!bot || !bot->Pawn || !bot->PC) return;
 
         if (bot->TargetDropZone.IsZero()) {
             ChooseDropZone(bot);
@@ -1102,7 +1521,6 @@ public:
             DropTarget.Z = BusLocation.Z;
 
             if (GameState->GamePhase > EAthenaGamePhase::Aircraft) {
-                Log("Force Jump");
                 bot->Pawn->K2_TeleportTo(DropTarget, {});
                 bot->Pawn->BeginSkydiving(true);
                 bot->BotState = EBotState::Skydiving;
@@ -1113,12 +1531,9 @@ public:
             }
 
             float DistanceToDrop = Math->Vector_Distance(BusLocation, DropTarget);
-            //Log("DistanceToDrop: " + std::to_string(DistanceToDrop));
-            //Log("ClosestDistToDropZone: " + std::to_string(bot->ClosestDistToDropZone));
             if (DistanceToDrop < bot->ClosestDistToDropZone) {
                 bot->ClosestDistToDropZone = DistanceToDrop;
-            }
-            else {
+            } else {
                 if (!bot->bHasThankedBusDriver && Math->RandomBoolWithWeight(0.5f)) {
                     bot->bHasThankedBusDriver = true;
                     bot->PC->ThankBusDriver();
@@ -1146,34 +1561,17 @@ public:
             }
 
             if (!bot->TargetDropZone.IsZero()) {
-                float Height = BotPos.Z;
-                float DistToTarget = Math->Vector_Distance(FVector(BotPos.X, BotPos.Y, 0), FVector(bot->TargetDropZone.X, bot->TargetDropZone.Y, 0));
+                FVector Target = bot->TargetDropZone;
+                Target.Z = BotPos.Z;
 
-                // OGSM - Deploy glider at optimal height (300m)
-                if (Height < 300.0f && DistToTarget < 500.0f) {
+                FRotator LookAt = UKismetMathLibrary::FindLookAtRotation(BotPos, Target);
+                bot->PC->SetControlRotation(LookAt);
+                bot->PC->K2_SetActorRotation(LookAt, true);
+
+                if (BotPos.Z > 1000.0f) {
+                    bot->Pawn->AddMovementInput(FVector(0, 0, -1), 2.0f, true);
+                } else {
                     bot->BotState = EBotState::Gliding;
-                }
-                // OGSM - 90s diving for optimal speed (~60 m/s)
-                else if (Globals::bStrategicDroppingEnabled && Height > 500.0f) {
-                    FVector Direction = (bot->TargetDropZone - BotPos).GetNormalized();
-                    FVector DiveDirection = Direction;
-                    DiveDirection.Z = -0.7f; // Steep dive angle
-                    FRotator TargetRot = Math->FindLookAtRotation(BotPos, bot->TargetDropZone);
-                    bot->PC->SetControlRotation(TargetRot);
-                    bot->PC->K2_SetActorRotation(TargetRot, true);
-                    bot->Pawn->CharacterMovement->Velocity = DiveDirection * 6000.0f;
-                }
-                else {
-                    // Standard skydiving
-                    bot->Pawn->AddMovementInput(Math->NegateVector(bot->Pawn->GetActorUpVector()), 1, true);
-
-                    float Dist = Math->Vector_Distance(BotPos, bot->TargetDropZone);
-                    auto TestRot = Math->FindLookAtRotation(BotPos, bot->TargetDropZone);
-
-                    bot->PC->SetControlRotation(TestRot);
-                    bot->PC->K2_SetActorRotation(TestRot, true);
-
-                    bot->PC->MoveToLocation(bot->TargetDropZone, 200.f, true, false, false, true, nullptr, true);
                 }
             }
         }
@@ -1189,7 +1587,6 @@ public:
             }
 
             if (!bot->TargetDropZone.IsZero()) {
-                float Dist = Math->Vector_Distance(BotPos, bot->TargetDropZone);
                 auto TestRot = Math->FindLookAtRotation(BotPos, bot->TargetDropZone);
 
                 bot->PC->SetControlRotation(TestRot);
@@ -1562,8 +1959,6 @@ namespace PlayerBots {
 
         auto GameState = (AFortGameStateAthena*)UWorld::GetWorld()->GameState;
         auto Math = (UKismetMathLibrary*)UKismetMathLibrary::StaticClass()->DefaultObject;
-        auto GameMode = (AFortGameModeAthena*)UWorld::GetWorld()->AuthorityGameMode;
-        auto Statics = (UGameplayStatics*)UGameplayStatics::StaticClass()->DefaultObject;
 
         for (auto bot : PlayerBotArray) {
             if (!bot || !bot->Pawn || !bot->PC || !bot->PlayerState)
@@ -1576,16 +1971,54 @@ namespace PlayerBots {
                 }
             }
 
+            bot->UpdateMaterialCounts();
+
+            float Now = UGameplayStatics::GetDefaultObj()->GetTimeSeconds(UWorld::GetWorld());
+            if (Now - bot->LastDamageTime > 3.f) {
+                bot->bIsUnderFire = false;
+                bot->ConsecutiveShotsTaken = 0;
+            }
+
+            if (bot->BotState == EBotState::Warmup) {
+                bot->UpdateLobbyBehavior();
+                continue;
+            }
+
+            if (bot->BotState == EBotState::LookingForPlayers && bot->NearestPlayerActor) {
+                FVector BotLoc = bot->Pawn->K2_GetActorLocation();
+                FVector EnemyLoc = bot->NearestPlayerActor->K2_GetActorLocation();
+                float Dist = BotLoc.DistanceTo(EnemyLoc);
+
+                if (bot->ShouldTakeHighGround(bot->NearestPlayerActor)) {
+                    bot->Perform90s();
+                } else if (bot->ShouldBoxUp()) {
+                    bot->BuildBox();
+                }
+
+                bot->SwitchToBestWeaponForDistance(Dist);
+
+                if (Dist < 1000.f) bot->CrouchSpam();
+
+                bot->FireWithHumanImperfection(bot->NearestPlayerActor);
+            }
+
+            if (bot->BotState == EBotState::FightingBoss) {
+                bot->UpdateBossFight();
+            }
+
+            if (bot->bNeedsFarming && bot->BotState == EBotState::Landed) {
+                bot->FarmTick();
+            }
+
+            if (bot->ShouldUseVehicle(bot->TargetDropZone)) {
+            }
+
             if (bot->BotState > EBotState::Bus) {
                 BotsBTService_AIEvaluator Evaluator;
                 Evaluator.Tick(bot); // tick the evaluator after the bot is out of the bus so we dont mess up anything or cause potential crash
             }
 
-            if (bot->BotState == EBotState::Warmup) {
-                BotsBTService_Warmup Warmup;
-                Warmup.Tick(bot);
-            }
-            else if (bot->BotState == EBotState::PreBus) {
+            if (bot->BotState == EBotState::PreBus) {
                 bot->Pawn->SetHealth(100);
                 bot->Pawn->SetShield(100);
                 if (!bot->bHasThankedBusDriver && UKismetMathLibrary::GetDefaultObj()->RandomBoolWithWeight(0.0005f))
@@ -1612,6 +2045,7 @@ namespace PlayerBots {
                 }
                 
                 BotsBTService_AIDropZone DropZoneEv;
+                DropZoneEv.ChooseDropZone(bot);
                 DropZoneEv.Tick(bot);
             }
             else if (bot->BotState == EBotState::Landed) {

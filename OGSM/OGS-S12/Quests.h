@@ -353,4 +353,153 @@ namespace Quests {
 
         Log("Quests Hooked!");
     }
+
+    // ============================================================================
+    // PLAYER QUESTS SYSTEM (utilisant UFortQuestManager, UFortAthenaXPComponent)
+    // ============================================================================
+    enum class EPlayerQuestType {
+        Eliminations,
+        OpenChests,
+        SurviveStormPhases,
+        TravelDistance,
+        EliminateBoss,
+        OpenVault,
+        UseVehicle,
+        PlaceTopTen,
+        PlaceTopOne,
+        WeaponEliminations
+    };
+
+    enum class EQuestRarity {
+        Daily,
+        Weekly
+    };
+
+    struct FPlayerQuest {
+        FString QuestId;
+        FString QuestName;
+        EPlayerQuestType Type;
+        int32 CurrentProgress;
+        int32 TargetProgress;
+        int32 XPReward;
+        bool bCompleted;
+        EQuestRarity Rarity;
+    };
+
+    inline std::map<AFortPlayerControllerAthena*, std::vector<FPlayerQuest>> PlayerQuestsMap;
+    inline std::map<AFortPlayerControllerAthena*, FVector> LastPlayerPositions;
+    inline std::map<AFortPlayerControllerAthena*, int32> PlayerStormPhasesSurvived;
+
+    inline void InitializePlayerDailyQuests(AFortPlayerControllerAthena* PC) {
+        if (!PC) return;
+
+        std::vector<FPlayerQuest> Quests;
+
+        FPlayerQuest Q1;
+        Q1.QuestId = L"daily_elim_3";
+        Q1.QuestName = L"Eliminer 3 ennemis";
+        Q1.Type = EPlayerQuestType::Eliminations;
+        Q1.CurrentProgress = 0;
+        Q1.TargetProgress = 3;
+        Q1.XPReward = 1000;
+        Q1.bCompleted = false;
+        Q1.Rarity = EQuestRarity::Daily;
+        Quests.push_back(Q1);
+
+        FPlayerQuest Q2;
+        Q2.QuestId = L"daily_chest_5";
+        Q2.QuestName = L"Ouvrir 5 coffres";
+        Q2.Type = EPlayerQuestType::OpenChests;
+        Q2.CurrentProgress = 0;
+        Q2.TargetProgress = 5;
+        Q2.XPReward = 800;
+        Q2.bCompleted = false;
+        Q2.Rarity = EQuestRarity::Daily;
+        Quests.push_back(Q2);
+
+        FPlayerQuest Q3;
+        Q3.QuestId = L"daily_survive_3";
+        Q3.QuestName = L"Survivre a 3 phases de storm";
+        Q3.Type = EPlayerQuestType::SurviveStormPhases;
+        Q3.CurrentProgress = 0;
+        Q3.TargetProgress = 3;
+        Q3.XPReward = 1200;
+        Q3.bCompleted = false;
+        Q3.Rarity = EQuestRarity::Daily;
+        Quests.push_back(Q3);
+
+        FPlayerQuest Q4;
+        Q4.QuestId = L"daily_boss_1";
+        Q4.QuestName = L"Eliminer un boss";
+        Q4.Type = EPlayerQuestType::EliminateBoss;
+        Q4.CurrentProgress = 0;
+        Q4.TargetProgress = 1;
+        Q4.XPReward = 2000;
+        Q4.bCompleted = false;
+        Q4.Rarity = EQuestRarity::Daily;
+        Quests.push_back(Q4);
+
+        PlayerQuestsMap[PC] = Quests;
+        PlayerStormPhasesSurvived[PC] = 0;
+    }
+
+    inline void UpdatePlayerQuestProgress(AFortPlayerControllerAthena* PC, EPlayerQuestType Type, int32 Count) {
+        if (!PC) return;
+
+        auto It = PlayerQuestsMap.find(PC);
+        if (It == PlayerQuestsMap.end()) return;
+
+        for (auto& Quest : It->second) {
+            if (Quest.Type == Type && !Quest.bCompleted) {
+                Quest.CurrentProgress += Count;
+
+                if (Quest.CurrentProgress >= Quest.TargetProgress) {
+                    Quest.bCompleted = true;
+
+                    if (PC->XPComponent) {
+                        FXPEventInfo EventInfo{};
+                        EventInfo.EventXpValue = Quest.XPReward;
+                        EventInfo.TotalXpEarnedInMatch = PC->XPComponent->TotalXpEarned + Quest.XPReward;
+                        PC->XPComponent->ChallengeXp += Quest.XPReward;
+                        PC->XPComponent->TotalXpEarned += Quest.XPReward;
+                        PC->XPComponent->OnXPEvent(EventInfo);
+                    }
+
+                }
+            }
+        }
+    }
+
+    inline void OnPlayerEliminatedBot(AFortPlayerControllerAthena* PC, AFortPlayerStateAthena* Victim) {
+        if (!PC || !Victim) return;
+        UpdatePlayerQuestProgress(PC, EPlayerQuestType::Eliminations, 1);
+    }
+
+    inline void OnPlayerOpenedChest(AFortPlayerControllerAthena* PC) {
+        if (!PC) return;
+        UpdatePlayerQuestProgress(PC, EPlayerQuestType::OpenChests, 1);
+    }
+
+    inline void OnPlayerSurvivedStormPhase(AFortPlayerControllerAthena* PC) {
+        if (!PC) return;
+        PlayerStormPhasesSurvived[PC]++;
+        UpdatePlayerQuestProgress(PC, EPlayerQuestType::SurviveStormPhases, 1);
+    }
+
+    inline void UpdatePlayerDistanceTraveled(AFortPlayerControllerAthena* PC) {
+        if (!PC || !PC->Pawn) return;
+
+        FVector CurrentPos = PC->Pawn->K2_GetActorLocation();
+        auto It = LastPlayerPositions.find(PC);
+
+        if (It != LastPlayerPositions.end()) {
+            float Dist = CurrentPos.DistanceTo(It->second);
+            if (Dist > 1000.0f) {
+                UpdatePlayerQuestProgress(PC, EPlayerQuestType::TravelDistance, (int32)(Dist / 1000.0f));
+                LastPlayerPositions[PC] = CurrentPos;
+            }
+        } else {
+            LastPlayerPositions[PC] = CurrentPos;
+        }
+    }
 }
